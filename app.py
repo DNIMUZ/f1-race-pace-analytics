@@ -55,7 +55,7 @@ st.sidebar.markdown("---")
 year = st.sidebar.selectbox(
     "📅 Season",
     [2026, 2025, 2024, 2023],
-    index=0
+    index=1
 )
 
 races = [
