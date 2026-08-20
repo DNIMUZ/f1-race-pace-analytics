@@ -12,7 +12,7 @@
 
 ## 🚀 Live Demo
 
-**[View on Streamlit Cloud](https://f1-race-pace-analytics.streamlit.app)** ← Click to explore live!
+**[View on Streamlit Cloud](https://f1-race-pace-analytics-2qxyxwwxl798wejx3y3xxt.streamlit.app/)** ← Click to explore live!
 
 *(Opens in your browser — no installation needed)*
 
