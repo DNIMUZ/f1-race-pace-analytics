@@ -5,6 +5,7 @@ Interactive Streamlit dashboard for analyzing F1 race data.
 
 import streamlit as st
 import pandas as pd
+import plotly.graph_objects as go
 from src.analytics import (
     load_race_data,
     plot_pace_analysis,
