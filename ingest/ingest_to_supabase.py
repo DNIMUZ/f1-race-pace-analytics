@@ -114,7 +114,8 @@ def _driver_rows(session, race_round):
             info = session.get_driver(code)
             rows.append(
                 {
-                    "season": int(session.event["EventDate"].year),
+                    "race_season": int(session.event["EventDate"].year),
+                    "race_round": race_round,
                     "driver_code": code,
                     "driver_number": int(info.DriverNumber),
                     "full_name": getattr(info, "FullName", code),
@@ -182,6 +183,7 @@ def _td_seconds(value):
 def upsert_df(conn, table_name, rows, key_columns):
     """Upsert a list of dict rows into a Postgres table using ON CONFLICT."""
     import psycopg2
+    import psycopg2.extras
 
     if isinstance(rows, list):
         if not rows:
@@ -196,13 +198,11 @@ def upsert_df(conn, table_name, rows, key_columns):
 
     # create placeholders
     with conn.cursor() as cur:
-        cols_sql = ", ".join(col_names)
+        cols_sql = ", ".join(f'"{c}"' for c in col_names)
         updates_sql = ", ".join(f'"{c}" = EXCLUDED."{c}"' for c in col_names if c not in key_columns)
-        # only keep key columns in conflict list
         conflict_sql = ", ".join(key_columns)
-        placeholders = ", ".join(["%s"] * len(col_names))
         sql = (
-            f'INSERT INTO public."{table_name}" ({cols_sql}) VALUES ({placeholders}) '
+            f'INSERT INTO public."{table_name}" ({cols_sql}) VALUES %s '
             f'ON CONFLICT ({conflict_sql}) DO UPDATE SET {updates_sql}'
         )
         values = [tuple(row[col] for col in col_names) for _, row in df.iterrows()]
@@ -264,7 +264,7 @@ def main():
     conn = psycopg2.connect(os.getenv("SUPABASE_DATABASE_URL"))
     conn.autocommit = True
     upsert_df(conn, "races", race_rows, ["season", "round_number"])
-    upsert_df(conn, "drivers", driver_rows, ["season", "driver_code"])
+    upsert_df(conn, "drivers", driver_rows, ["race_season", "race_round", "driver_code"])
     upsert_df(conn, "laps", lap_rows, ["race_season", "race_round", "driver_code", "lap_number"])
     conn.close()
     logger.info("Supabase upsert complete.")

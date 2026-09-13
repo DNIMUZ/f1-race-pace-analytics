@@ -13,13 +13,16 @@ create table if not exists public.races (
     primary key (season, round_number)
 );
 
+-- Drivers is a per-race dimension (team/number can change mid-season):
+--   one row per (season, round, driver_code), matching laps' foreign key.
 create table if not exists public.drivers (
-    season         int not null,
+    race_season    int not null,
+    race_round     int not null,
     driver_code    text not null,
     driver_number  int,
     full_name      text,
     team           text,
-    primary key (season, driver_code)
+    primary key (race_season, race_round, driver_code)
 );
 
 create table if not exists public.laps (
@@ -42,4 +45,4 @@ create table if not exists public.laps (
 
 create index if not exists idx_laps_race on public.laps (race_season, race_round);
 create index if not exists idx_laps_driver on public.laps (driver_code);
-create index if not exists idx_drivers_season on public.drivers (season);
+create index if not exists idx_laps_round_driver on public.laps (race_round, driver_code);

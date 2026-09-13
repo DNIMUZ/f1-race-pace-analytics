@@ -99,16 +99,16 @@ In **Model view** set up relationships:
    ```
    Then one clean relationship: **laps[race_key] (many) → races[race_key] (one)**, Cross filter: Single, both directions off.
 
-2. Since drivers is per-season, link **laps → drivers** instead for one relationship per table:
-   in `laps` add `driver_season_code`:
+2. Link **laps → drivers** (per-race driver dimension): in `laps` add
+   `driver_race_code`:
    ```
-   driver_season_code = Text.From([race_season]) & "-" & [driver_code]
+   driver_race_code = Text.From([race_season]) & "-" & Text.From([race_round]) & "-" & [driver_code]
    ```
    in `drivers` add:
    ```
-   driver_season_code = Text.From([season]) & "-" & [driver_code]
+   driver_race_code = Text.From([race_season]) & "-" & Text.From([race_round]) & "-" & [driver_code]
    ```
-   Relationship: **laps[driver_season_code] (many) → drivers[driver_season_code] (one)**.
+   Relationship: **laps[driver_race_code] (many) → drivers[driver_race_code] (one)**.
 
    (If the multi-key version works fine in your Power BI version, use it directly.)
 
