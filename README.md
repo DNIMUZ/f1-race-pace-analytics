@@ -182,6 +182,25 @@ Lewis Hamilton (HAM):  1:46.012 → 1:45.234 → 1:46.567 (high variance, pit st
 
 ---
 
+## 📊 Power BI Version
+
+The same race data is available as a **Power BI dashboard** backed by a **Supabase Postgres** warehouse.
+
+- **ETL:** [`ingest/ingest_to_supabase.py`](/ingest/ingest_to_supabase.py) pulls the season from the
+  FastF1 API, transforms it into a star schema (`races`, `drivers`, `laps`), and upserts into
+  Supabase (or falls back to local CSVs with `--csv`).
+- **Schema:** [`powerbi/supabase_schema.sql`](/powerbi/supabase_schema.sql)
+- **Build guide:** [`powerbi/POWERBI_STEPBYSTEP.md`](/powerbi/POWERBI_STEPBYSTEP.md) — connect Power BI
+  Desktop to Supabase via the native PostgreSQL connector, model the star schema, write DAX measures
+  and publish with scheduled refresh.
+
+```powershell
+python ingest/ingest_to_supabase.py --year 2026          # -> Supabase
+python ingest/ingest_to_supabase.py --year 2026 --csv    # -> powerbi/*.csv
+```
+
+---
+
 ## 🚀 Deployment (Streamlit Cloud)
 
 ### Option 1: Deploy Your Own Fork (Recommended)
