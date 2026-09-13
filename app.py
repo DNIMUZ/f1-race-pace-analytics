@@ -66,7 +66,16 @@ st.markdown("""
         border: 1px solid #E3E3E6 !important;
         background: #FFFFFF;
     }
-    div[data-baseweb="tag"] { border-radius: 8px; }
+    div[data-baseweb="tag"] {
+        border-radius: 8px;
+        background-color: var(--accent) !important;
+    }
+    div[data-baseweb="tag"] span {
+        color: #FFFFFF !important;
+    }
+    div[data-baseweb="tag"] svg {
+        fill: #FFFFFF !important;
+    }
 
     button[data-baseweb="tab"] {
         font-size: 14px;
@@ -74,8 +83,11 @@ st.markdown("""
         color: var(--muted);
     }
     button[data-baseweb="tab"][aria-selected="true"] {
-        color: var(--ink);
+        color: var(--accent);
         font-weight: 600;
+    }
+    div[data-baseweb="tab-highlight"] {
+        background-color: var(--accent);
     }
 
     div[data-testid="stMetricValue"] { font-weight: 600; }
