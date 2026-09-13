@@ -11,14 +11,15 @@ from src.analytics import (
     plot_pace_analysis,
     plot_tyre_degradation,
     get_pit_stops,
-    get_driver_stats
+    get_driver_stats,
+    APPLE_THEME_LAYOUT,
 )
 from src import db
 import logging
 
 # Configure Streamlit page
 st.set_page_config(
-    page_title="🏎️ Box-Box Analytics",
+    page_title="Box-Box Analytics",
     page_icon="🏁",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -28,19 +29,128 @@ st.set_page_config(
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Custom CSS for better styling
+# Apple-like visual language
 st.markdown("""
 <style>
-    .metric-card {
-        background-color: #f0f2f6;
-        padding: 20px;
-        border-radius: 8px;
-        margin: 10px 0;
+    :root {
+        --ink: #1D1D1F;
+        --muted: #6E6E73;
+        --faint: #86868B;
+        --line: #ECECEE;
+        --card: #F7F7F8;
+        --accent: #D70015;
     }
-    .header-title {
-        color: #FF0000;
-        font-size: 3em;
-        font-weight: bold;
+
+    html, body, [class*="css"] {
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text",
+                     "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    .stApp { background: #FFFFFF; }
+
+    .block-container { max-width: 1180px; margin: 0 auto; }
+
+    header[data-testid="stHeader"] { background: transparent; }
+    #MainMenu, footer { visibility: hidden; }
+
+    section[data-testid="stSidebar"] {
+        background: #FAFAFA;
+        border-right: 1px solid var(--line);
+    }
+    section[data-testid="stSidebar"] hr { border-color: var(--line); }
+
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="input"] > div {
+        box-shadow: none !important;
+        border-radius: 10px;
+        border: 1px solid #E3E3E6 !important;
+        background: #FFFFFF;
+    }
+    div[data-baseweb="tag"] { border-radius: 8px; }
+
+    button[data-baseweb="tab"] {
+        font-size: 14px;
+        letter-spacing: .01em;
+        color: var(--muted);
+    }
+    button[data-baseweb="tab"][aria-selected="true"] {
+        color: var(--ink);
+        font-weight: 600;
+    }
+
+    div[data-testid="stMetricValue"] { font-weight: 600; }
+
+    /* Brand hero */
+    .hero-eyebrow {
+        font-size: 12px;
+        letter-spacing: .16em;
+        text-transform: uppercase;
+        color: var(--faint);
+        margin-bottom: 14px;
+    }
+    .hero-title {
+        font-size: 2.7rem;
+        font-weight: 700;
+        letter-spacing: -.03em;
+        color: var(--ink);
+        line-height: 1.08;
+        margin: 0 0 14px;
+    }
+    .hero-subtitle {
+        font-size: 1.06rem;
+        color: var(--muted);
+        line-height: 1.5;
+        max-width: 640px;
+        margin: 0;
+    }
+
+    .side-brand {
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: -.01em;
+        color: var(--ink);
+        padding: 4px 0 10px;
+    }
+    .side-caption {
+        font-size: 12px;
+        line-height: 1.5;
+        color: var(--muted);
+        margin: 2px 0 0;
+    }
+
+    .view-caption {
+        font-size: 13px;
+        letter-spacing: .02em;
+        color: var(--muted);
+        margin-top: 30px;
+    }
+
+    .stat-card {
+        background: var(--card);
+        border-radius: 16px;
+        padding: 18px 20px 20px;
+        height: 100%;
+    }
+    .stat-label {
+        font-size: 11px;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin: 0 0 8px;
+    }
+    .stat-value {
+        font-size: 2.1rem;
+        font-weight: 600;
+        letter-spacing: -.02em;
+        color: var(--ink);
+        line-height: 1.05;
+        margin: 0;
+    }
+    .stat-unit {
+        font-size: 1rem;
+        font-weight: 400;
+        color: var(--faint);
+        margin-left: 4px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -49,8 +159,13 @@ st.markdown("""
 # SIDEBAR: DATA SOURCE + RACE SELECTION
 # ============================================================================
 
-st.sidebar.header("🔌 Data Source")
-st.sidebar.markdown("---")
+st.sidebar.markdown("<div class='side-brand'>Box-Box</div>", unsafe_allow_html=True)
+
+
+@st.cache_data
+def db_is_available() -> bool:
+    return db.is_available()
+
 
 source_choice = st.sidebar.radio(
     "Data source",
@@ -58,12 +173,6 @@ source_choice = st.sidebar.radio(
     index=0,
     help="Auto uses the Supabase warehouse when reachable, otherwise falls back to FastF1.",
 )
-
-
-@st.cache_data
-def db_is_available() -> bool:
-    return db.is_available()
-
 
 db_available = db_is_available() if source_choice != "FastF1 (live)" else False
 
@@ -74,41 +183,40 @@ elif source_choice == "Supabase warehouse":
 else:
     use_db = db_available
 
+st.sidebar.markdown("---")
+
 if use_db and not db_available:
     st.sidebar.error(
-        "⚠️ Supabase warehouse not reachable — SUPABASE_DATABASE_URL is missing. "
-        "Add it via Streamlit → Settings → Secrets, or switch to FastF1 (live). "
-        "See README → Data Sources."
+        "The warehouse isn't reachable yet. "
+        "Add SUPABASE_DATABASE_URL under Settings → Secrets, "
+        "or switch to FastF1 (live)."
     )
     st.stop()
-
-st.sidebar.markdown("---")
-st.sidebar.header("🏁 Select Race")
 
 # Season choices depend on the data source
 if use_db:
     try:
         db_seasons = db.list_seasons()
     except RuntimeError as e:
-        st.sidebar.error(f"⚠️ {e}")
+        st.sidebar.error(f"Couldn't reach the warehouse. {e}")
         st.stop()
     if not db_seasons:
-        st.sidebar.error("❌ No races in the warehouse. Run: python ingest/ingest_to_supabase.py --year 2026")
+        st.sidebar.error("The warehouse is empty. Run the ingest script first.")
         st.stop()
     seasons = db_seasons
 else:
     seasons = [2026, 2025, 2024, 2023]
 
-year = st.sidebar.selectbox("📅 Season", seasons, index=0)
+year = st.sidebar.selectbox("Season", seasons, index=0)
 
 if use_db:
     try:
         races = db.list_races(year)
     except RuntimeError as e:
-        st.sidebar.error(f"⚠️ {e}")
+        st.sidebar.error(f"Couldn't reach the warehouse. {e}")
         st.stop()
     if not races:
-        st.sidebar.error(f"❌ No races in the warehouse for {year}. Run the ingest script for that season.")
+        st.sidebar.error(f"No races in the warehouse for {year}. Run the ingest script.")
         st.stop()
 else:
     races = [
@@ -117,89 +225,79 @@ else:
         'Silverstone', 'Hungary', 'Belgium', 'Italy', 'Singapore'
     ]
 
-race_name = st.sidebar.selectbox(
-    "🏁 Grand Prix",
-    races,
-    index=0
-)
+race_name = st.sidebar.selectbox("Grand Prix", races, index=0)
 
 st.sidebar.markdown("---")
 
 if use_db:
-    st.sidebar.success(
-        "📊 **Source:** Supabase warehouse\n\n"
-        "Reading the F1 star schema you built (races, laps)."
-    )
+    st.sidebar.caption("Source — Supabase warehouse\nraces · laps")
 else:
-    st.sidebar.info(
-        "📊 **Source:** FastF1 (Official FIA Timing Data)\n\n"
-        "Live fetch from FastF1 — on Streamlit Cloud this feed can be blocked."
-    )
+    st.sidebar.caption("Source — FastF1 (live timing)\ncan be throttled on the cloud")
 
 # ============================================================================
 # MAIN HEADER
 # ============================================================================
 
-col1, col2 = st.columns([3, 1])
-with col1:
-    st.markdown(f"<div class='header-title'>🏎️ Box-Box Analytics</div>", unsafe_allow_html=True)
-    st.markdown(f"### {year} {race_name.replace(' Grand Prix', '')} Grand Prix — Race Pace & Strategy")
-with col2:
-    st.markdown("")  # Spacing
+display_race = race_name.replace(" Grand Prix", "")
 
-st.markdown("Analyze F1 race pace, tyre degradation, and pit stop strategies using official timing data.")
-st.markdown("---")
+st.markdown(
+    f"""
+    <div class='hero-eyebrow'>Formula 1 · {year} season</div>
+    <div class='hero-title'>Box-Box Analytics</div>
+    <p class='hero-subtitle'>Race pace, tyre behaviour and pit-stop timing — one focused view on every Grand Prix.</p>
+    """,
+    unsafe_allow_html=True,
+)
 
 # ============================================================================
 # DATA LOADING
 # ============================================================================
 
-# Use Streamlit caching to avoid reloading data
 @st.cache_data
 def load_cached_data(source, year, race):
     try:
         if source == "db":
             laps_df = db.load_race_from_db(year, race)
             if laps_df.empty:
-                st.error(
-                    f"❌ No laps in the Supabase warehouse for {year} {race}. "
-                    f"Run: python ingest/ingest_to_supabase.py --year {year}"
-                )
+                st.error(f"No laps for {year} {race} in the warehouse. Run the ingest script.")
                 return None
             return laps_df
         return load_race_data(year, race)
     except Exception as e:
-        st.error(f"❌ Error loading race data: {e}")
+        st.error(f"Couldn't load this race. {e}")
         return None
 
 source_tag = "db" if use_db else "fastf1"
 source_label = "Supabase warehouse" if use_db else "FastF1"
 
-# Load data with spinner
-with st.spinner(f"📡 Loading {year} {race_name.replace(' Grand Prix', '')} GP data from {source_label}..."):
+with st.spinner(f"Loading {display_race} from {source_label}…"):
     laps = load_cached_data(source_tag, year, race_name)
 
 if laps is None or laps.empty:
-    st.error("Could not load race data. Please try another race/year combination.")
+    st.error("Nothing to show for this race. Try another selection.")
     st.stop()
 
-# Display data summary
-st.success(f"✅ Loaded {len(laps)} laps from {len(laps['Driver'].unique())} drivers")
+st.markdown(
+    f"<div class='view-caption'>Now viewing — {display_race} Grand Prix, {year} · "
+    f"{len(laps):,} valid laps across {len(laps['Driver'].unique())} drivers</div>",
+    unsafe_allow_html=True,
+)
 
 # ============================================================================
 # DRIVER SELECTION
 # ============================================================================
 
-st.subheader("👥 Select Drivers to Compare")
+st.markdown("#### Drivers")
 
 all_drivers = sorted(laps['Driver'].unique())
 default_drivers = all_drivers[:3] if len(all_drivers) >= 3 else all_drivers
 
 selected_drivers = st.multiselect(
-    "Choose drivers (or leave empty to show all)",
+    "Which drivers to compare",
     options=all_drivers,
     default=default_drivers,
-    key="driver_select"
+    placeholder="Choose at least one",
+    key="driver_select",
 )
 
 if not selected_drivers:
@@ -211,145 +309,136 @@ st.markdown("---")
 # TABS: MAIN ANALYSIS
 # ============================================================================
 
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Race Pace", "🛞 Tyre Degradation", "⛽ Pit Stops", "📈 Driver Stats"])
+tab_pace, tab_tyre, tab_pits, tab_stats = st.tabs(["Pace", "Tyres", "Pit Stops", "Driver Stats"])
 
 # ============================================================================
 # TAB 1: RACE PACE
 # ============================================================================
 
-with tab1:
-    st.subheader("Lap Time Evolution")
-    st.markdown(
-        "Visualize how lap times evolve throughout the race. "
-        "Steeper drops indicate better pace; flat lines show consistency."
-    )
-    
-    if selected_drivers:
-        fig_pace = plot_pace_analysis(laps, selected_drivers)
-        st.plotly_chart(fig_pace, use_container_width=True)
-        
-        # Add insights
-        with st.expander("📊 What to look for"):
-            st.markdown("""
-            - **Downward slope:** Tyre warm-up or fresh rubber after pit stop
-            - **Upward slope:** Tyre degradation (older tyres = slower)
-            - **Flat line:** Consistent pace (often indicator of great driving)
-            - **Sharp spikes:** Mistakes, traffic, or fuel adjustment
-            """)
-    else:
-        st.warning("Select at least one driver")
+with tab_pace:
+    st.markdown("##### Lap time evolution")
+    st.caption("How each driver’s pace unfolds, lap by lap.")
+    st.plotly_chart(plot_pace_analysis(laps, selected_drivers), use_container_width=True)
+
+    with st.expander("What to look for"):
+        st.markdown("""
+        - **A downward trend** — fresh rubber, or a strong phase of the race
+        - **An upward trend** — degradation starting to bite
+        - **A flat line** — consistent, controlled pace
+        - **Sharp spikes** — traffic, errors or strategy moments
+        """)
 
 # ============================================================================
 # TAB 2: TYRE DEGRADATION
 # ============================================================================
 
-with tab2:
-    st.subheader("Tyre Degradation Analysis")
-    st.markdown(
-        "Compare tyre performance across compounds (SOFT, MEDIUM, HARD). "
-        "Shows lap time vs. tyre age in laps."
-    )
-    
+with tab_tyre:
+    st.markdown("##### Tyre performance")
+    st.caption("Lap time against tyre age, for each compound.")
+
     selected_driver_tyre = st.selectbox(
-        "Choose a driver to analyze",
+        "Driver",
         options=selected_drivers if selected_drivers else all_drivers,
-        key="tyre_driver"
+        key="tyre_driver",
     )
-    
-    if selected_driver_tyre:
-        fig_tyre = plot_tyre_degradation(laps, selected_driver_tyre)
-        st.plotly_chart(fig_tyre, use_container_width=True)
-        
-        # Driver stats for selected driver
-        stats = get_driver_stats(laps, selected_driver_tyre)
-        if stats:
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("🏁 Best Lap", f"{stats['best_lap']:.2f}s")
-            with col2:
-                st.metric("📊 Avg Lap", f"{stats['avg_lap']:.2f}s")
-            with col3:
-                st.metric("📈 Consistency (σ)", f"{stats['std_dev']:.2f}s")
-            with col4:
-                st.metric("🔢 Total Laps", stats['total_laps'])
+
+    st.plotly_chart(plot_tyre_degradation(laps, selected_driver_tyre), use_container_width=True)
+
+    stats = get_driver_stats(laps, selected_driver_tyre)
+    if stats:
+        cards = [
+            ("Best lap", stats['best_lap']),
+            ("Average lap", stats['avg_lap']),
+            ("Consistency", stats['std_dev']),
+            ("Total laps", stats['total_laps']),
+        ]
+        stat_cols = st.columns(4)
+        for col, (label, value) in zip(stat_cols, cards):
+            with col:
+                if label == "Total laps":
+                    st.markdown(
+                        f"<div class='stat-card'><p class='stat-label'>{label}</p>"
+                        f"<p class='stat-value'>{value}</p></div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(
+                        f"<div class='stat-card'><p class='stat-label'>{label}</p>"
+                        f"<p class='stat-value'>{value:.2f}<span class='stat-unit'>s</span></p></div>",
+                        unsafe_allow_html=True,
+                    )
 
 # ============================================================================
 # TAB 3: PIT STOPS
 # ============================================================================
 
-with tab3:
-    st.subheader("Pit Stop Timeline & Strategy")
-    st.markdown("See when each driver made pit stops and what compounds were used.")
-    
+with tab_pits:
+    st.markdown("##### Pit stops")
+    st.caption("When tyres were changed, and for what compound.")
+
     pit_stops = get_pit_stops(laps)
-    
+
     if not pit_stops.empty:
-        # Filter pit stops by selected drivers
         pit_stops_filtered = pit_stops[pit_stops['Driver'].isin(selected_drivers)].sort_values('LapNumber')
-        
-        # Display pit stop table
+
         st.dataframe(
             pit_stops_filtered.rename(columns={
-                'Driver': '👤 Driver',
-                'LapNumber': '🔢 Lap',
-                'CompoundOut': '🛞 Compound',
-                'LapTimeSeconds': '⏱️ Pit Lap Time (s)'
+                'Driver': 'Driver',
+                'LapNumber': 'Lap',
+                'CompoundOut': 'Compound',
+                'LapTimeSeconds': 'Pit lap time (s)'
             }),
             use_container_width=True,
-            hide_index=True
+            hide_index=True,
         )
-        
-        # Pit stop count chart
-        st.subheader("Pit Stops per Driver")
-        pit_count = pit_stops[pit_stops['Driver'].isin(selected_drivers)].groupby('Driver').size().reset_index(name='Pit Stops')
-        
+
+        pit_count = pit_stops[pit_stops['Driver'].isin(selected_drivers)].groupby('Driver').size().reset_index(name='count')
+
         fig_pits = go.Figure(data=[
             go.Bar(
                 x=pit_count['Driver'],
-                y=pit_count['Pit Stops'],
-                marker_color='#FF0000',
-                text=pit_count['Pit Stops'],
-                textposition='outside'
+                y=pit_count['count'],
+                marker_color='#D70015',
+                text=pit_count['count'],
+                textposition='outside',
+                cliponaxis=False,
             )
         ])
         fig_pits.update_layout(
-            title="Number of Pit Stops by Driver",
-            xaxis_title="Driver",
-            yaxis_title="Pit Stops",
+            xaxis_title='Driver',
+            yaxis_title='Stops',
             height=400,
-            template='plotly_white'
+            **APPLE_THEME_LAYOUT,
         )
         st.plotly_chart(fig_pits, use_container_width=True)
     else:
-        st.info("No pit stops detected in this race")
+        st.info("No pit stops detected in this race.")
 
 # ============================================================================
 # TAB 4: DRIVER STATS
 # ============================================================================
 
-with tab4:
-    st.subheader("Driver Performance Summary")
-    st.markdown("Compare key metrics across all selected drivers")
-    
-    # Build stats for all selected drivers
+with tab_stats:
+    st.markdown("##### Driver comparison")
+    st.caption("Best, average and consistency, side by side.")
+
     stats_data = []
     for driver in selected_drivers:
         driver_stats = get_driver_stats(laps, driver)
         if driver_stats:
             stats_data.append({
                 'Driver': driver,
-                'Best Lap (s)': f"{driver_stats['best_lap']:.3f}",
-                'Avg Lap (s)': f"{driver_stats['avg_lap']:.3f}",
-                'Median Lap (s)': f"{driver_stats['median_lap']:.3f}",
-                'Std Dev (s)': f"{driver_stats['std_dev']:.3f}",
-                'Total Laps': driver_stats['total_laps']
+                'Best (s)': f"{driver_stats['best_lap']:.3f}",
+                'Average (s)': f"{driver_stats['avg_lap']:.3f}",
+                'Median (s)': f"{driver_stats['median_lap']:.3f}",
+                'Consistency (s)': f"{driver_stats['std_dev']:.3f}",
+                'Laps': driver_stats['total_laps'],
             })
-    
+
     if stats_data:
-        stats_df = pd.DataFrame(stats_data)
-        st.dataframe(stats_df, use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(stats_data), use_container_width=True, hide_index=True)
     else:
-        st.warning("No stats available for selected drivers")
+        st.warning("No stats available for these drivers.")
 
 # ============================================================================
 # FOOTER
@@ -358,10 +447,10 @@ with tab4:
 st.markdown("---")
 st.markdown(
     """
-    <div style='text-align: center; color: #999; font-size: 0.9em;'>
-    🏎️ <b>Box-Box Analytics</b> — Built with Pandas, Plotly & Streamlit<br>
-    📊 FastF1 (live timing) + Supabase Warehouse (races · laps) | 🔗 <a href='https://github.com/diniemuzaffar/f1-race-pace-analytics'>GitHub</a>
+    <div style='text-align: center; color: #86868B; font-size: 12px; line-height: 1.8;'>
+    Box-Box Analytics — speed, measured.<br>
+    FastF1 · Supabase · Streamlit &nbsp;|&nbsp; <a href='https://github.com/diniemuzaffar/f1-race-pace-analytics' style='color: #1D1D1F;'>GitHub</a>
     </div>
     """,
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )

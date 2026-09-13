@@ -21,6 +21,43 @@ fastf1.Cache.enable_cache(str(cache_dir))
 
 logger = logging.getLogger(__name__)
 
+# Apple-like neutral chart theme shared by all Plotly figures
+APPLE_THEME_LAYOUT = {
+    "template": "plotly_white",
+    "font": dict(
+        family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif",
+        size=13,
+        color="#1D1D1F",
+    ),
+    "margin": dict(l=70, r=30, t=24, b=52),
+    "plot_bgcolor": "rgba(0,0,0,0)",
+    "paper_bgcolor": "rgba(0,0,0,0)",
+    "hoverlabel": dict(bgcolor="#1D1D1F", font=dict(color="#FFFFFF", size=13)),
+    "xaxis": dict(showgrid=True, gridcolor="#ECECEE", zeroline=False),
+    "yaxis": dict(showgrid=True, gridcolor="#ECECEE", zeroline=False),
+    "legend": dict(
+        orientation="h",
+        yanchor="bottom",
+        y=1.02,
+        xanchor="left",
+        x=0,
+        bgcolor="rgba(0,0,0,0)",
+    ),
+}
+
+ACCENT_CYCLIC = [
+    "#1D1D1F",
+    "#D70015",
+    "#0071E3",
+    "#6E6E73",
+    "#34C759",
+    "#AF52DE",
+    "#FF9500",
+    "#00C7BE",
+    "#A2845E",
+    "#5E5CE6",
+]
+
 
 def load_race_data(year: int, race: str) -> pd.DataFrame:
     """
@@ -68,32 +105,30 @@ def plot_pace_analysis(laps: pd.DataFrame, drivers: List[str]) -> go.Figure:
         Plotly figure with interactive lap time chart
     """
     fig = go.Figure()
-    
-    for driver in drivers:
+
+    for i, driver in enumerate(drivers):
         driver_laps = laps[laps['Driver'] == driver].sort_values('LapNumber')
-        
+
         fig.add_trace(go.Scatter(
             x=driver_laps['LapNumber'],
             y=driver_laps['LapTimeSeconds'],
             mode='lines+markers',
             name=driver,
-            line=dict(width=2),
+            line=dict(width=2, color=ACCENT_CYCLIC[i % len(ACCENT_CYCLIC)]),
             marker=dict(size=5),
-            text=[f"Compound: {c}<br>Tyre Life: {t}" 
+            text=[f"Compound: {c}<br>Tyre Life: {t}"
                   for c, t in zip(driver_laps['Compound'], driver_laps['TyreLife'])],
             hovertemplate='<b>%{fullData.name}</b><br>Lap %{x}<br>Time: %{y:.3f}s<br>%{text}<extra></extra>'
         ))
-    
+
     fig.update_layout(
-        title='🏎️ Race Pace Analysis — Lap Time Evolution',
-        xaxis_title='Lap Number',
-        yaxis_title='Lap Time (seconds)',
+        xaxis_title='Lap number',
+        yaxis_title='Lap time (s)',
         hovermode='x unified',
-        template='plotly_white',
-        height=600,
-        font=dict(size=12)
+        height=560,
+        **APPLE_THEME_LAYOUT
     )
-    
+
     return fig
 
 
@@ -137,14 +172,12 @@ def plot_tyre_degradation(laps: pd.DataFrame, driver: str) -> go.Figure:
         ))
     
     fig.update_layout(
-        title=f'🛞 Tyre Degradation — {driver}',
-        xaxis_title='Tyre Age (laps)',
-        yaxis_title='Lap Time (seconds)',
-        template='plotly_white',
-        height=600,
-        font=dict(size=12)
+        xaxis_title='Tyre age (laps)',
+        yaxis_title='Lap time (s)',
+        height=560,
+        **APPLE_THEME_LAYOUT
     )
-    
+
     return fig
 
 
