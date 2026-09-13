@@ -12,7 +12,7 @@ from src.analytics import (
     plot_tyre_degradation,
     get_pit_stops,
     get_driver_stats,
-    APPLE_THEME_LAYOUT,
+    chart_theme,
 )
 from src import db
 import logging
@@ -29,8 +29,111 @@ st.set_page_config(
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Apple-like visual language
-st.markdown("""
+# ============================================================================
+# SIDEBAR: MODE + DATA SOURCE + RACE SELECTION
+# ============================================================================
+
+st.sidebar.markdown("<div class='side-brand'>Box-Box</div>", unsafe_allow_html=True)
+
+dark = st.sidebar.toggle("Dark mode", value=False, help="Night view for a calm read.")
+
+st.sidebar.markdown("---")
+
+
+@st.cache_data
+def db_is_available() -> bool:
+    return db.is_available()
+
+
+source_choice = st.sidebar.radio(
+    "Data source",
+    ["Auto (warehouse first)", "FastF1 (live)", "Supabase warehouse"],
+    index=0,
+    help="Auto uses the Supabase warehouse when reachable, otherwise falls back to FastF1.",
+)
+
+db_available = db_is_available() if source_choice != "FastF1 (live)" else False
+
+if source_choice == "FastF1 (live)":
+    use_db = False
+elif source_choice == "Supabase warehouse":
+    use_db = True
+else:
+    use_db = db_available
+
+st.sidebar.markdown("---")
+
+if use_db and not db_available:
+    st.sidebar.error(
+        "The warehouse isn't reachable yet. "
+        "Add SUPABASE_DATABASE_URL under Settings → Secrets, "
+        "or switch to FastF1 (live)."
+    )
+    st.stop()
+
+if use_db:
+    try:
+        db_seasons = db.list_seasons()
+    except RuntimeError as e:
+        st.sidebar.error(f"Couldn't reach the warehouse. {e}")
+        st.stop()
+    if not db_seasons:
+        st.sidebar.error("The warehouse is empty. Run the ingest script first.")
+        st.stop()
+    seasons = db_seasons
+else:
+    seasons = [2026, 2025, 2024, 2023]
+
+year = st.sidebar.selectbox("Season", seasons, index=0)
+
+FALLBACK_RACES = [
+    'Australia', 'China', 'Japan', 'Miami', 'Canada', 'Monaco',
+    'Barcelona', 'Austria', 'Britain', 'Belgium', 'Hungary',
+    'Netherlands', 'Italy',
+]
+
+
+@st.cache_data
+def fastf1_races(season: int) -> list:
+    try:
+        import fastf1
+        schedule = fastf1.get_event_schedule(season)
+        names = [
+            row['EventName']
+            for _, row in schedule.iterrows()
+            if pd.notna(row.get('Session5Date'))
+        ]
+        return names if names else FALLBACK_RACES
+    except Exception:
+        return FALLBACK_RACES
+
+
+if use_db:
+    try:
+        races = db.list_races(year)
+    except RuntimeError as e:
+        st.sidebar.error(f"Couldn't reach the warehouse. {e}")
+        st.stop()
+    if not races:
+        st.sidebar.error(f"No races in the warehouse for {year}. Run the ingest script.")
+        st.stop()
+else:
+    races = fastf1_races(year)
+
+race_name = st.sidebar.selectbox("Grand Prix", races, index=0)
+
+st.sidebar.markdown("---")
+
+if use_db:
+    st.sidebar.caption("Source — Supabase warehouse\nraces · laps")
+else:
+    st.sidebar.caption("Source — FastF1 (live timing)")
+
+# ============================================================================
+# APPLE-LIKE VISUAL LANGUAGE
+# ============================================================================
+
+LIGHT_CSS = """
 <style>
     :root {
         --ink: #1D1D1F;
@@ -90,8 +193,6 @@ st.markdown("""
         background-color: var(--accent);
     }
 
-    div[data-testid="stMetricValue"] { font-weight: 600; }
-
     /* Brand hero */
     .hero-eyebrow {
         font-size: 12px;
@@ -122,12 +223,6 @@ st.markdown("""
         letter-spacing: -.01em;
         color: var(--ink);
         padding: 4px 0 10px;
-    }
-    .side-caption {
-        font-size: 12px;
-        line-height: 1.5;
-        color: var(--muted);
-        margin: 2px 0 0;
     }
 
     .view-caption {
@@ -164,87 +259,249 @@ st.markdown("""
         color: var(--faint);
         margin-left: 4px;
     }
+
+    .table-wrap {
+        overflow-x: auto;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 6px 4px;
+    }
+    .apple-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: inherit;
+        font-size: 13px;
+    }
+    .apple-table th {
+        text-align: left;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: .06em;
+        color: var(--muted);
+        padding: 10px 14px;
+    }
+    .apple-table td {
+        text-align: left;
+        color: var(--ink);
+        padding: 9px 14px;
+        border-bottom: 1px solid var(--line);
+    }
+    .apple-table tr:last-child td { border-bottom: none; }
+
+    .footer {
+        text-align: center;
+        color: var(--faint);
+        font-size: 12px;
+        line-height: 1.8;
+    }
+    .footer a { color: var(--ink); text-decoration: none; }
 </style>
-""", unsafe_allow_html=True)
+"""
 
-# ============================================================================
-# SIDEBAR: DATA SOURCE + RACE SELECTION
-# ============================================================================
+DARK_CSS = """
+<style>
+    :root {
+        --ink: #F5F5F7;
+        --muted: #A1A1A6;
+        --faint: #6E6E73;
+        --line: #2C2C2E;
+        --card: #1C1C1E;
+        --accent: #FF453A;
+        color-scheme: dark;
+    }
 
-st.sidebar.markdown("<div class='side-brand'>Box-Box</div>", unsafe_allow_html=True)
+    html, body, [class*="css"] {
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text",
+                     "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    .stApp { background: #000000 !important; }
+
+    .block-container { max-width: 1180px; margin: 0 auto; }
+
+    header[data-testid="stHeader"] { background: transparent; }
+    #MainMenu, footer { visibility: hidden; }
+
+    section[data-testid="stSidebar"] {
+        background: #161618 !important;
+        border-right: 1px solid var(--line);
+    }
+    section[data-testid="stSidebar"] hr { border-color: var(--line); }
+
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="input"] > div {
+        box-shadow: none !important;
+        border-radius: 10px;
+        border: 1px solid #3A3A3C !important;
+        background: #1C1C1E !important;
+    }
+    div[data-baseweb="select"] div[class*="SingleValue"],
+    div[data-baseweb="select"] div[class*="multiValue"],
+    div[data-baseweb="select"] div[class*="valueContainer"] {
+        color: var(--ink) !important;
+    }
+    div[data-baseweb="select"] input::placeholder,
+    div[data-baseweb="input"] input::placeholder {
+        color: var(--faint) !important;
+    }
+    div[data-baseweb="tag"] {
+        border-radius: 8px;
+        background-color: var(--accent) !important;
+    }
+    div[data-baseweb="tag"] span {
+        color: #FFFFFF !important;
+    }
+    div[data-baseweb="tag"] svg {
+        fill: #FFFFFF !important;
+    }
+    label { color: var(--ink) !important; }
+    div[data-testid="stSidebar"] p,
+    [data-testid="stRadio"] p { color: var(--ink); }
+    [data-testid="stMarkdownContainer"] p,
+    [data-testid="stMarkdownContainer"] h4,
+    [data-testid="stMarkdownContainer"] h5,
+    [data-testid="stMarkdownContainer"] li,
+    details summary,
+    [data-testid="stExpander"] p { color: var(--ink) !important; }
+    [data-testid="stCaptionContainer"] p,
+    [data-testid="stSpinner"] p,
+    details { color: var(--muted) !important; }
+
+    button[data-baseweb="tab"] {
+        font-size: 14px;
+        letter-spacing: .01em;
+        color: var(--muted);
+    }
+    button[data-baseweb="tab"][aria-selected="true"] {
+        color: var(--accent);
+        font-weight: 600;
+    }
+    div[data-baseweb="tab-highlight"] {
+        background-color: var(--accent);
+    }
+
+    /* Brand hero */
+    .hero-eyebrow {
+        font-size: 12px;
+        letter-spacing: .16em;
+        text-transform: uppercase;
+        color: var(--faint);
+        margin-bottom: 14px;
+    }
+    .hero-title {
+        font-size: 2.7rem;
+        font-weight: 700;
+        letter-spacing: -.03em;
+        color: var(--ink);
+        line-height: 1.08;
+        margin: 0 0 14px;
+    }
+    .hero-subtitle {
+        font-size: 1.06rem;
+        color: var(--muted);
+        line-height: 1.5;
+        max-width: 640px;
+        margin: 0;
+    }
+
+    .side-brand {
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: -.01em;
+        color: var(--ink);
+        padding: 4px 0 10px;
+    }
+
+    .view-caption {
+        font-size: 13px;
+        letter-spacing: .02em;
+        color: var(--muted);
+        margin-top: 30px;
+    }
+
+    .stat-card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 18px 20px 20px;
+        height: 100%;
+    }
+    .stat-label {
+        font-size: 11px;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin: 0 0 8px;
+    }
+    .stat-value {
+        font-size: 2.1rem;
+        font-weight: 600;
+        letter-spacing: -.02em;
+        color: var(--ink);
+        line-height: 1.05;
+        margin: 0;
+    }
+    .stat-unit {
+        font-size: 1rem;
+        font-weight: 400;
+        color: var(--faint);
+        margin-left: 4px;
+    }
+
+    .table-wrap {
+        overflow-x: auto;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 6px 4px;
+    }
+    .apple-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: inherit;
+        font-size: 13px;
+    }
+    .apple-table th {
+        text-align: left;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: .06em;
+        color: var(--muted);
+        padding: 10px 14px;
+    }
+    .apple-table td {
+        text-align: left;
+        color: var(--ink);
+        padding: 9px 14px;
+        border-bottom: 1px solid var(--line);
+    }
+    .apple-table tr:last-child td { border-bottom: none; }
+
+    .footer {
+        text-align: center;
+        color: var(--faint);
+        font-size: 12px;
+        line-height: 1.8;
+    }
+    .footer a { color: var(--ink); text-decoration: none; }
+</style>
+"""
+
+st.markdown(DARK_CSS if dark else LIGHT_CSS, unsafe_allow_html=True)
 
 
-@st.cache_data
-def db_is_available() -> bool:
-    return db.is_available()
-
-
-source_choice = st.sidebar.radio(
-    "Data source",
-    ["Auto (warehouse first)", "FastF1 (live)", "Supabase warehouse"],
-    index=0,
-    help="Auto uses the Supabase warehouse when reachable, otherwise falls back to FastF1.",
-)
-
-db_available = db_is_available() if source_choice != "FastF1 (live)" else False
-
-if source_choice == "FastF1 (live)":
-    use_db = False
-elif source_choice == "Supabase warehouse":
-    use_db = True
-else:
-    use_db = db_available
-
-st.sidebar.markdown("---")
-
-if use_db and not db_available:
-    st.sidebar.error(
-        "The warehouse isn't reachable yet. "
-        "Add SUPABASE_DATABASE_URL under Settings → Secrets, "
-        "or switch to FastF1 (live)."
+def apple_table(df: pd.DataFrame) -> None:
+    """Render a DataFrame as a smooth, static Apple-style table."""
+    styled = (
+        df.style
+        .hide(axis='index')
+        .format({df.columns[-1]: '{:.2f}'})
+        .set_table_attributes('class="apple-table"')
+        .to_html(border=0)
     )
-    st.stop()
+    st.markdown(f"<div class='table-wrap'>{styled}</div>", unsafe_allow_html=True)
 
-# Season choices depend on the data source
-if use_db:
-    try:
-        db_seasons = db.list_seasons()
-    except RuntimeError as e:
-        st.sidebar.error(f"Couldn't reach the warehouse. {e}")
-        st.stop()
-    if not db_seasons:
-        st.sidebar.error("The warehouse is empty. Run the ingest script first.")
-        st.stop()
-    seasons = db_seasons
-else:
-    seasons = [2026, 2025, 2024, 2023]
-
-year = st.sidebar.selectbox("Season", seasons, index=0)
-
-if use_db:
-    try:
-        races = db.list_races(year)
-    except RuntimeError as e:
-        st.sidebar.error(f"Couldn't reach the warehouse. {e}")
-        st.stop()
-    if not races:
-        st.sidebar.error(f"No races in the warehouse for {year}. Run the ingest script.")
-        st.stop()
-else:
-    races = [
-        'Bahrain', 'Saudi Arabia', 'Australia', 'Japan', 'China',
-        'Miami', 'Monaco', 'Canada', 'Spain', 'Austria',
-        'Silverstone', 'Hungary', 'Belgium', 'Italy', 'Singapore'
-    ]
-
-race_name = st.sidebar.selectbox("Grand Prix", races, index=0)
-
-st.sidebar.markdown("---")
-
-if use_db:
-    st.sidebar.caption("Source — Supabase warehouse\nraces · laps")
-else:
-    st.sidebar.caption("Source — FastF1 (live timing)\ncan be throttled on the cloud")
 
 # ============================================================================
 # MAIN HEADER
@@ -330,7 +587,7 @@ tab_pace, tab_tyre, tab_pits, tab_stats = st.tabs(["Pace", "Tyres", "Pit Stops",
 with tab_pace:
     st.markdown("##### Lap time evolution")
     st.caption("How each driver’s pace unfolds, lap by lap.")
-    st.plotly_chart(plot_pace_analysis(laps, selected_drivers), use_container_width=True)
+    st.plotly_chart(plot_pace_analysis(laps, selected_drivers, dark=dark), use_container_width=True)
 
     with st.expander("What to look for"):
         st.markdown("""
@@ -354,7 +611,7 @@ with tab_tyre:
         key="tyre_driver",
     )
 
-    st.plotly_chart(plot_tyre_degradation(laps, selected_driver_tyre), use_container_width=True)
+    st.plotly_chart(plot_tyre_degradation(laps, selected_driver_tyre, dark=dark), use_container_width=True)
 
     stats = get_driver_stats(laps, selected_driver_tyre)
     if stats:
@@ -392,16 +649,13 @@ with tab_pits:
 
     if not pit_stops.empty:
         pit_stops_filtered = pit_stops[pit_stops['Driver'].isin(selected_drivers)].sort_values('LapNumber')
-
-        st.dataframe(
+        apple_table(
             pit_stops_filtered.rename(columns={
                 'Driver': 'Driver',
                 'LapNumber': 'Lap',
                 'CompoundOut': 'Compound',
                 'LapTimeSeconds': 'Pit lap time (s)'
-            }),
-            use_container_width=True,
-            hide_index=True,
+            })
         )
 
         pit_count = pit_stops[pit_stops['Driver'].isin(selected_drivers)].groupby('Driver').size().reset_index(name='count')
@@ -420,7 +674,7 @@ with tab_pits:
             xaxis_title='Driver',
             yaxis_title='Stops',
             height=400,
-            **APPLE_THEME_LAYOUT,
+            **chart_theme(dark),
         )
         st.plotly_chart(fig_pits, use_container_width=True)
     else:
@@ -448,7 +702,7 @@ with tab_stats:
             })
 
     if stats_data:
-        st.dataframe(pd.DataFrame(stats_data), use_container_width=True, hide_index=True)
+        apple_table(pd.DataFrame(stats_data))
     else:
         st.warning("No stats available for these drivers.")
 
@@ -459,9 +713,9 @@ with tab_stats:
 st.markdown("---")
 st.markdown(
     """
-    <div style='text-align: center; color: #86868B; font-size: 12px; line-height: 1.8;'>
+    <div class='footer'>
     Box-Box Analytics — speed, measured.<br>
-    FastF1 · Supabase · Streamlit &nbsp;|&nbsp; <a href='https://github.com/diniemuzaffar/f1-race-pace-analytics' style='color: #1D1D1F;'>GitHub</a>
+    FastF1 · Supabase · Streamlit &nbsp;|&nbsp; <a href='https://github.com/diniemuzaffar/f1-race-pace-analytics'>GitHub</a>
     </div>
     """,
     unsafe_allow_html=True,
