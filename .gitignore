@@ -34,7 +34,8 @@ data/cache/
 .fastf1_cache/
 
 # Streamlit
-.streamlit/
+.streamlit/*
+!.streamlit/config.toml
 
 # IDE
 .vscode/
