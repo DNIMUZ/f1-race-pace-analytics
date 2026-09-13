@@ -45,6 +45,35 @@ APPLE_THEME_LAYOUT = {
     ),
 }
 
+APPLE_THEME_LAYOUT_DARK = {
+    "template": "plotly_dark",
+    "font": dict(
+        family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif",
+        size=13,
+        color="#F5F5F7",
+    ),
+    "margin": dict(l=70, r=30, t=24, b=52),
+    "plot_bgcolor": "rgba(0,0,0,0)",
+    "paper_bgcolor": "rgba(0,0,0,0)",
+    "hoverlabel": dict(bgcolor="#F5F5F7", font=dict(color="#1D1D1F", size=13)),
+    "xaxis": dict(showgrid=True, gridcolor="#2C2C2E", zeroline=False),
+    "yaxis": dict(showgrid=True, gridcolor="#2C2C2E", zeroline=False),
+    "legend": dict(
+        orientation="h",
+        yanchor="bottom",
+        y=1.02,
+        xanchor="left",
+        x=0,
+        bgcolor="rgba(0,0,0,0)",
+    ),
+}
+
+
+def chart_theme(dark: bool = False) -> dict:
+    """Pick the chart layout for the current mode."""
+    return APPLE_THEME_LAYOUT_DARK if dark else APPLE_THEME_LAYOUT
+
+
 ACCENT_CYCLIC = [
     "#D70015",
     "#1D1D1F",
@@ -92,7 +121,7 @@ def load_race_data(year: int, race: str) -> pd.DataFrame:
         raise ValueError(f"Could not load {year} {race} data: {e}")
 
 
-def plot_pace_analysis(laps: pd.DataFrame, drivers: List[str]) -> go.Figure:
+def plot_pace_analysis(laps: pd.DataFrame, drivers: List[str], dark: bool = False) -> go.Figure:
     """
     Plot lap time evolution for selected drivers.
     Shows consistency, pace, and degradation over the race.
@@ -126,13 +155,13 @@ def plot_pace_analysis(laps: pd.DataFrame, drivers: List[str]) -> go.Figure:
         yaxis_title='Lap time (s)',
         hovermode='x unified',
         height=560,
-        **APPLE_THEME_LAYOUT
+        **chart_theme(dark)
     )
 
     return fig
 
 
-def plot_tyre_degradation(laps: pd.DataFrame, driver: str) -> go.Figure:
+def plot_tyre_degradation(laps: pd.DataFrame, driver: str, dark: bool = False) -> go.Figure:
     """
     Plot tyre degradation curve showing lap time vs tyre age.
     Separate traces for each compound (SOFT, MEDIUM, HARD).
@@ -175,7 +204,7 @@ def plot_tyre_degradation(laps: pd.DataFrame, driver: str) -> go.Figure:
         xaxis_title='Tyre age (laps)',
         yaxis_title='Lap time (s)',
         height=560,
-        **APPLE_THEME_LAYOUT
+        **chart_theme(dark)
     )
 
     return fig
