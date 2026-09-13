@@ -13,6 +13,7 @@ from src.analytics import (
     get_pit_stops,
     get_driver_stats
 )
+from src import db
 import logging
 
 # Configure Streamlit page
@@ -45,24 +46,63 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================================================
-# SIDEBAR: RACE SELECTION
+# SIDEBAR: DATA SOURCE + RACE SELECTION
 # ============================================================================
 
-st.sidebar.header("🏁 Select Race")
+st.sidebar.header("🔌 Data Source")
 st.sidebar.markdown("---")
 
-# Sidebar inputs
-year = st.sidebar.selectbox(
-    "📅 Season",
-    [2026, 2025, 2024, 2023],
-    index=1
+source_choice = st.sidebar.radio(
+    "Data source",
+    ["Auto (warehouse first)", "FastF1 (live)", "Supabase warehouse"],
+    index=0,
+    help="Auto uses the Supabase warehouse when reachable, otherwise falls back to FastF1.",
 )
 
-races = [
-    'Bahrain', 'Saudi Arabia', 'Australia', 'Japan', 'China',
-    'Miami', 'Monaco', 'Canada', 'Spain', 'Austria',
-    'Silverstone', 'Hungary', 'Belgium', 'Italy', 'Singapore'
-]
+
+@st.cache_data
+def db_is_available() -> bool:
+    return db.is_available()
+
+
+db_available = db_is_available() if source_choice != "FastF1 (live)" else False
+
+if source_choice == "FastF1 (live)":
+    use_db = False
+elif source_choice == "Supabase warehouse":
+    use_db = True
+else:
+    use_db = db_available
+
+if use_db and not db_available:
+    st.sidebar.error("⚠️ Supabase warehouse not reachable — check SUPABASE_DATABASE_URL.")
+
+st.sidebar.markdown("---")
+st.sidebar.header("🏁 Select Race")
+
+# Season choices depend on the data source
+if use_db:
+    db_seasons = db.list_seasons()
+    if not db_seasons:
+        st.sidebar.error("❌ No races in the warehouse. Run: python ingest/ingest_to_supabase.py --year 2026")
+        st.stop()
+    seasons = db_seasons
+else:
+    seasons = [2026, 2025, 2024, 2023]
+
+year = st.sidebar.selectbox("📅 Season", seasons, index=0)
+
+if use_db:
+    races = db.list_races(year)
+    if not races:
+        st.sidebar.error(f"❌ No races in the warehouse for {year}. Run the ingest script for that season.")
+        st.stop()
+else:
+    races = [
+        'Bahrain', 'Saudi Arabia', 'Australia', 'Japan', 'China',
+        'Miami', 'Monaco', 'Canada', 'Spain', 'Austria',
+        'Silverstone', 'Hungary', 'Belgium', 'Italy', 'Singapore'
+    ]
 
 race_name = st.sidebar.selectbox(
     "🏁 Grand Prix",
@@ -71,10 +111,17 @@ race_name = st.sidebar.selectbox(
 )
 
 st.sidebar.markdown("---")
-st.sidebar.info(
-    "📊 **Data Source:** FastF1 (Official FIA Timing Data)\n\n"
-    "This dashboard uses real, telemetry-backed F1 timing data from FastF1."
-)
+
+if use_db:
+    st.sidebar.success(
+        "📊 **Source:** Supabase warehouse\n\n"
+        "Reading the F1 star schema you built (races, laps)."
+    )
+else:
+    st.sidebar.info(
+        "📊 **Source:** FastF1 (Official FIA Timing Data)\n\n"
+        "Live fetch from FastF1 — on Streamlit Cloud this feed can be blocked."
+    )
 
 # ============================================================================
 # MAIN HEADER
@@ -83,7 +130,7 @@ st.sidebar.info(
 col1, col2 = st.columns([3, 1])
 with col1:
     st.markdown(f"<div class='header-title'>🏎️ Box-Box Analytics</div>", unsafe_allow_html=True)
-    st.markdown(f"### {year} {race_name} Grand Prix — Race Pace & Strategy")
+    st.markdown(f"### {year} {race_name.replace(' Grand Prix', '')} Grand Prix — Race Pace & Strategy")
 with col2:
     st.markdown("")  # Spacing
 
@@ -96,16 +143,28 @@ st.markdown("---")
 
 # Use Streamlit caching to avoid reloading data
 @st.cache_data
-def load_cached_data(year, race):
+def load_cached_data(source, year, race):
     try:
+        if source == "db":
+            laps_df = db.load_race_from_db(year, race)
+            if laps_df.empty:
+                st.error(
+                    f"❌ No laps in the Supabase warehouse for {year} {race}. "
+                    f"Run: python ingest/ingest_to_supabase.py --year {year}"
+                )
+                return None
+            return laps_df
         return load_race_data(year, race)
     except Exception as e:
         st.error(f"❌ Error loading race data: {e}")
         return None
 
+source_tag = "db" if use_db else "fastf1"
+source_label = "Supabase warehouse" if use_db else "FastF1"
+
 # Load data with spinner
-with st.spinner(f"📡 Loading {year} {race_name} GP data from FastF1..."):
-    laps = load_cached_data(year, race_name)
+with st.spinner(f"📡 Loading {year} {race_name.replace(' Grand Prix', '')} GP data from {source_label}..."):
+    laps = load_cached_data(source_tag, year, race_name)
 
 if laps is None or laps.empty:
     st.error("Could not load race data. Please try another race/year combination.")
@@ -287,8 +346,8 @@ st.markdown("---")
 st.markdown(
     """
     <div style='text-align: center; color: #999; font-size: 0.9em;'>
-    🏎️ <b>Box-Box Analytics</b> — Built with FastF1, Pandas, Plotly & Streamlit<br>
-    📊 Official FIA Timing Data | 📱 Open Source | 🔗 <a href='https://github.com/diniemuzaffar/f1-race-pace-analytics'>GitHub</a>
+    🏎️ <b>Box-Box Analytics</b> — Built with Pandas, Plotly & Streamlit<br>
+    📊 FastF1 (live timing) + Supabase Warehouse (races · laps) | 🔗 <a href='https://github.com/diniemuzaffar/f1-race-pace-analytics'>GitHub</a>
     </div>
     """,
     unsafe_allow_html=True
