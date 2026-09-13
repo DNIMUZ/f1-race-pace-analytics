@@ -105,17 +105,35 @@ def load_race_data(year: int, race: str) -> pd.DataFrame:
     try:
         session = fastf1.get_session(year, race, 'R')  # 'R' = Race
         session.load()
+
+        # On Streamlit Cloud (or any host where livetiming.formula1.com is
+        # blocked), FastF1 silently swallows API failures inside soft
+        # exceptions and never sets the _laps attribute. Detect that here
+        # and raise a clear, actionable error instead of the cryptic
+        # "The data you are trying to access has not been loaded yet."
+        if not hasattr(session, '_laps'):
+            raise ValueError(
+                "FastF1 could not retrieve lap data for this session. "
+                "This usually happens on Streamlit Cloud because the "
+                "official F1 timing API (livetiming.formula1.com) blocks "
+                "cloud datacenter IPs. Use the Supabase warehouse source "
+                "(default) instead of FastF1 live, or run the app locally "
+                "where the API is reachable."
+            )
+
         laps = session.laps
-        
+
         # Convert LapTime to seconds for easier analysis
         laps['LapTimeSeconds'] = laps['LapTime'].dt.total_seconds()
-        
+
         # Filter out invalid laps (pit stops, outlaps, etc.)
         laps = laps[laps['LapTimeSeconds'].notna()].copy()
-        
+
         logger.info(f"Loaded {len(laps)} valid laps from {year} {race} GP")
         return laps
-    
+
+    except ValueError:
+        raise
     except Exception as e:
         logger.error(f"Failed to load race data: {e}")
         raise ValueError(f"Could not load {year} {race} data: {e}")

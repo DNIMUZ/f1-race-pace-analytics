@@ -55,6 +55,11 @@ source_choice = st.sidebar.radio(
 db_available = db_is_available() if source_choice != "FastF1 (live)" else False
 
 if source_choice == "FastF1 (live)":
+    st.sidebar.caption(
+        "Tip: on Streamlit Cloud the F1 timing API is usually blocked "
+        "(lap data fails to load). Use the Supabase warehouse — it has "
+        "all 13 completed 2026 rounds."
+    )
     use_db = False
 elif source_choice == "Supabase warehouse":
     use_db = True
