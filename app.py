@@ -75,14 +75,23 @@ else:
     use_db = db_available
 
 if use_db and not db_available:
-    st.sidebar.error("⚠️ Supabase warehouse not reachable — check SUPABASE_DATABASE_URL.")
+    st.sidebar.error(
+        "⚠️ Supabase warehouse not reachable — SUPABASE_DATABASE_URL is missing. "
+        "Add it via Streamlit → Settings → Secrets, or switch to FastF1 (live). "
+        "See README → Data Sources."
+    )
+    st.stop()
 
 st.sidebar.markdown("---")
 st.sidebar.header("🏁 Select Race")
 
 # Season choices depend on the data source
 if use_db:
-    db_seasons = db.list_seasons()
+    try:
+        db_seasons = db.list_seasons()
+    except RuntimeError as e:
+        st.sidebar.error(f"⚠️ {e}")
+        st.stop()
     if not db_seasons:
         st.sidebar.error("❌ No races in the warehouse. Run: python ingest/ingest_to_supabase.py --year 2026")
         st.stop()
@@ -93,7 +102,11 @@ else:
 year = st.sidebar.selectbox("📅 Season", seasons, index=0)
 
 if use_db:
-    races = db.list_races(year)
+    try:
+        races = db.list_races(year)
+    except RuntimeError as e:
+        st.sidebar.error(f"⚠️ {e}")
+        st.stop()
     if not races:
         st.sidebar.error(f"❌ No races in the warehouse for {year}. Run the ingest script for that season.")
         st.stop()
