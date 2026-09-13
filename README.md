@@ -122,8 +122,10 @@ f1-race-pace-analytics/
 │
 ├── src/
 │   ├── __init__.py            # Package initialization
-│   └── analytics.py           # Core analytics functions
-│                               # (load_race_data, plot_pace_analysis, etc.)
+│   ├── analytics.py           # Core analytics functions
+│   │                           # (load_race_data, plot_pace_analysis, etc.)
+│   └── db.py                  # Supabase warehouse access
+│                               # (list_seasons, list_races, load_race_from_db)
 │
 ├── data/
 │   └── cache/                 # FastF1 cached race data (auto-generated)
@@ -198,6 +200,30 @@ The same race data is available as a **Power BI dashboard** backed by a **Supaba
 python ingest/ingest_to_supabase.py --year 2026          # -> Supabase
 python ingest/ingest_to_supabase.py --year 2026 --csv    # -> powerbi/*.csv
 ```
+
+---
+
+## 🔌 Data Sources
+
+The Streamlit app can read race data from **two sources**, chosen from the sidebar:
+
+| Source | When to use |
+|--------|-------------|
+| **Auto (warehouse first)** *(default)* | Uses the Supabase warehouse when `SUPABASE_DATABASE_URL` is set; falls back to FastF1 live otherwise |
+| **FastF1 (live)** | Fetches live from FastF1 — most reliable when running locally with a warm cache; can be blocked on Streamlit Cloud |
+| **Supabase warehouse** | Reads the pre-built `races`/`laps` tables — no FastF1/Ergast dependency, always reliable if the DB is reachable |
+
+To use the warehouse mode:
+
+1. **Run the ingest** to populate the warehouse (see above).
+2. **Point the app at the DB** via the `SUPABASE_DATABASE_URL` connection string:
+   - **Local:** create a `.env` file in the repo root (git-ignored):
+     ```
+     SUPABASE_DATABASE_URL=postgresql://postgres.PROJECT_REF:PASSWORD@aws-0-region.pooler.supabase.com:5432/postgres
+     ```
+   - **Streamlit Cloud:** add the same key under **Settings → Secrets** (`SUPABASE_DATABASE_URL`).
+
+You can copy the connection string from your Supabase **Project Settings → Database → Connection string → Session pooler (port 5432)**.
 
 ---
 
