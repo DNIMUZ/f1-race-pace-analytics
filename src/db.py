@@ -36,6 +36,51 @@ COLUMN_MAP = {
     "pit_out_time": "PitOutTime",
 }
 
+# Warehouse results columns -> analytics-format columns
+RESULTS_COLUMN_MAP = {
+    "driver_code": "Driver",
+    "full_name": "FullName",
+    "team": "Team",
+    "grid_position": "Grid",
+    "position": "Position",
+    "classified_position": "Classified",
+    "status": "Status",
+    "points": "Points",
+    "laps": "Laps",
+}
+
+
+def classify_result_status(raw_status) -> str:
+    """
+    Map FastF1/FIA status strings to short display classifiers.
+
+    Covers the common classifications: Finished, DNF (did not finish),
+    DSQ (disqualified), DNS (did not start), DNQ (did not qualify) and
+    'Unknown' when nothing reliable can be said.
+    """
+    if raw_status is None:
+        return "Unknown"
+    s = str(raw_status).strip().lower()
+    if not s or s == "nan":
+        return "Unknown"
+    if "disqualified" in s or s == "dsq":
+        return "DSQ"
+    if "not classified" in s:
+        return "NotClassified"
+    if "dnf" in s:
+        return "DNF"
+    if "dnq" in s or "not qualified" in s or "did not qualify" in s:
+        return "DNQ"
+    if "dns" in s or "did not start" in s or "did not participate" in s:
+        return "DNS"
+    if "finished" in s or s.startswith("+") or "lap" in s:
+        return "Finished"
+    # Anything else (Accident, Engine, Gearbox, Puncture, ...) with no
+    # numeric status means the driver retired mid-race.
+    if not s.isdigit():
+        return "DNF"
+    return "Finished"
+
 
 def _dsn() -> str:
     """Return the Supabase connection string from Secrets or .env."""
@@ -102,6 +147,51 @@ def to_analytics_format(laps_df: pd.DataFrame, rename_map: dict = None) -> pd.Da
 
     df = laps_df[cols.keys()].rename(columns=cols)
     return df[df["LapTimeSeconds"].notna()].reset_index(drop=True)
+
+
+def to_results_format(results_df: pd.DataFrame, rename_map: dict = None) -> pd.DataFrame:
+    """
+    Rename warehouse results columns to the analytics format, add a
+    StatusClass per driver and sort classified drivers first (position
+    ascending), with unclassified (DNF / DSQ / DNS / DNQ) at the bottom.
+
+    Pure function (no DB) so it can be unit-tested.
+    """
+    cols = rename_map or RESULTS_COLUMN_MAP
+    missing = [c for c in cols if c not in results_df.columns]
+    if missing:
+        raise ValueError(f"Warehouse results missing required columns: {missing}")
+
+    df = results_df[cols.keys()].rename(columns=cols)
+    df["StatusClass"] = df["Status"].map(classify_result_status).fillna("Unknown")
+    df = df.sort_values("Position", na_position="last", kind="mergesort")
+    return df.reset_index(drop=True)
+
+
+def load_race_results(season: int, race_name: str) -> pd.DataFrame:
+    """
+    Load one race's official classification from the warehouse in
+    analytics format. Returns an empty DataFrame when no results exist.
+    """
+    query = """
+        select res.driver_code, res.full_name, res.team,
+               res.grid_position, res.position, res.classified_position,
+               res.status, res.points, res.laps
+        from public.results res
+        join public.races r
+          on r.season = res.race_season
+         and r.round_number = res.race_round
+        where r.season = %s and r.name = %s
+    """
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(query, (season, race_name))
+        rows = cur.fetchall()
+        columns = [d[0] for d in cur.description]
+
+    if not rows:
+        return pd.DataFrame(columns=list(RESULTS_COLUMN_MAP.values()) + ["StatusClass"])
+
+    return to_results_format(pd.DataFrame(rows, columns=columns))
 
 
 def load_race_from_db(season: int, race_name: str) -> pd.DataFrame:

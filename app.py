@@ -12,9 +12,14 @@ from src.analytics import (
     plot_tyre_degradation,
     get_pit_stops,
     get_driver_stats,
+    get_race_narrative,
+    get_stint_summary,
+    plot_field_delta,
+    plot_strategy_grid,
     chart_theme,
 )
 from src import db
+from src.db import load_race_results
 import logging
 
 # Configure Streamlit page
@@ -30,13 +35,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ============================================================================
-# SIDEBAR: MODE + DATA SOURCE + RACE SELECTION
+# SIDEBAR: DATA SOURCE + RACE SELECTION
 # ============================================================================
 
 st.sidebar.markdown("<div class='side-brand'>Box-Box</div>", unsafe_allow_html=True)
-
-dark = st.sidebar.toggle("Dark mode", value=False, help="Night view for a calm read.")
-
 st.sidebar.markdown("---")
 
 
@@ -58,7 +60,7 @@ if source_choice == "FastF1 (live)":
     st.sidebar.caption(
         "Tip: on Streamlit Cloud the F1 timing API is usually blocked "
         "(lap data fails to load). Use the Supabase warehouse — it has "
-        "all 13 completed 2026 rounds."
+        "all 14 completed 2026 rounds."
     )
     use_db = False
 elif source_choice == "Supabase warehouse":
@@ -94,7 +96,7 @@ year = st.sidebar.selectbox("Season", seasons, index=0)
 FALLBACK_RACES = [
     'Australia', 'China', 'Japan', 'Miami', 'Canada', 'Monaco',
     'Barcelona', 'Austria', 'Britain', 'Belgium', 'Hungary',
-    'Netherlands', 'Italy',
+    'Netherlands', 'Italy', 'Spain',
 ]
 
 
@@ -135,7 +137,7 @@ else:
     st.sidebar.caption("Source — FastF1 (live timing)")
 
 # ============================================================================
-# APPLE-LIKE VISUAL LANGUAGE
+# APPLE-LIKE VISUAL LANGUAGE (light)
 # ============================================================================
 
 LIGHT_CSS = """
@@ -174,181 +176,19 @@ LIGHT_CSS = """
         border: 1px solid #E3E3E6 !important;
         background: #FFFFFF;
     }
-    div[data-baseweb="tag"] {
-        border-radius: 8px;
-        background-color: var(--accent) !important;
+    div[data-baseweb="menu"] {
+        background-color: #FFFFFF !important;
     }
-    div[data-baseweb="tag"] span {
-        color: #FFFFFF !important;
-    }
-    div[data-baseweb="tag"] svg {
-        fill: #FFFFFF !important;
-    }
-
-    button[data-baseweb="tab"] {
-        font-size: 14px;
-        letter-spacing: .01em;
-        color: var(--muted);
-    }
-    button[data-baseweb="tab"][aria-selected="true"] {
-        color: var(--accent);
-        font-weight: 600;
-    }
-    div[data-baseweb="tab-highlight"] {
-        background-color: var(--accent);
-    }
-
-    /* Brand hero */
-    .hero-eyebrow {
-        font-size: 12px;
-        letter-spacing: .16em;
-        text-transform: uppercase;
-        color: var(--faint);
-        margin-bottom: 14px;
-    }
-    .hero-title {
-        font-size: 2.7rem;
-        font-weight: 700;
-        letter-spacing: -.03em;
-        color: var(--ink);
-        line-height: 1.08;
-        margin: 0 0 14px;
-    }
-    .hero-subtitle {
-        font-size: 1.06rem;
-        color: var(--muted);
-        line-height: 1.5;
-        max-width: 640px;
-        margin: 0;
-    }
-
-    .side-brand {
-        font-size: 15px;
-        font-weight: 700;
-        letter-spacing: -.01em;
-        color: var(--ink);
-        padding: 4px 0 10px;
-    }
-
-    .view-caption {
-        font-size: 13px;
-        letter-spacing: .02em;
-        color: var(--muted);
-        margin-top: 30px;
-    }
-
-    .stat-card {
-        background: var(--card);
-        border-radius: 16px;
-        padding: 18px 20px 20px;
-        height: 100%;
-    }
-    .stat-label {
-        font-size: 11px;
-        letter-spacing: .08em;
-        text-transform: uppercase;
-        color: var(--muted);
-        margin: 0 0 8px;
-    }
-    .stat-value {
-        font-size: 2.1rem;
-        font-weight: 600;
-        letter-spacing: -.02em;
-        color: var(--ink);
-        line-height: 1.05;
-        margin: 0;
-    }
-    .stat-unit {
-        font-size: 1rem;
-        font-weight: 400;
-        color: var(--faint);
-        margin-left: 4px;
-    }
-
-    .table-wrap {
-        overflow-x: auto;
-        background: var(--card);
-        border: 1px solid var(--line);
-        border-radius: 14px;
-        padding: 6px 4px;
-    }
-    .apple-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-family: inherit;
-        font-size: 13px;
-    }
-    .apple-table th {
-        text-align: left;
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: .06em;
-        color: var(--muted);
-        padding: 10px 14px;
-    }
-    .apple-table td {
-        text-align: left;
-        color: var(--ink);
-        padding: 9px 14px;
-        border-bottom: 1px solid var(--line);
-    }
-    .apple-table tr:last-child td { border-bottom: none; }
-
-    .footer {
-        text-align: center;
-        color: var(--faint);
-        font-size: 12px;
-        line-height: 1.8;
-    }
-    .footer a { color: var(--ink); text-decoration: none; }
-</style>
-"""
-
-DARK_CSS = """
-<style>
-    :root {
-        --ink: #F5F5F7;
-        --muted: #A1A1A6;
-        --faint: #6E6E73;
-        --line: #2C2C2E;
-        --card: #1C1C1E;
-        --accent: #FF453A;
-        color-scheme: dark;
-    }
-
-    html, body, [class*="css"] {
-        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text",
-                     "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    }
-
-    .stApp { background: #000000 !important; }
-
-    .block-container { max-width: 1180px; margin: 0 auto; }
-
-    header[data-testid="stHeader"] { background: transparent; }
-    #MainMenu, footer { visibility: hidden; }
-
-    section[data-testid="stSidebar"] {
-        background: #161618 !important;
-        border-right: 1px solid var(--line);
-    }
-    section[data-testid="stSidebar"] hr { border-color: var(--line); }
-
-    div[data-baseweb="select"] > div,
-    div[data-baseweb="input"] > div {
-        box-shadow: none !important;
-        border-radius: 10px;
-        border: 1px solid #3A3A3C !important;
-        background: #1C1C1E !important;
-    }
-    div[data-baseweb="select"] div[class*="SingleValue"],
-    div[data-baseweb="select"] div[class*="multiValue"],
-    div[data-baseweb="select"] div[class*="valueContainer"] {
+    div[data-baseweb="option"],
+    li[data-baseweb="option"] {
         color: var(--ink) !important;
     }
-    div[data-baseweb="select"] input::placeholder,
-    div[data-baseweb="input"] input::placeholder {
-        color: var(--faint) !important;
+    div[data-baseweb="option"]:hover,
+    div[data-baseweb="option"]:focus,
+    li[data-baseweb="option"]:hover,
+    li[data-baseweb="option"]:focus {
+        background-color: var(--card) !important;
+        color: var(--ink) !important;
     }
     div[data-baseweb="tag"] {
         border-radius: 8px;
@@ -360,18 +200,6 @@ DARK_CSS = """
     div[data-baseweb="tag"] svg {
         fill: #FFFFFF !important;
     }
-    label { color: var(--ink) !important; }
-    div[data-testid="stSidebar"] p,
-    [data-testid="stRadio"] p { color: var(--ink); }
-    [data-testid="stMarkdownContainer"] p,
-    [data-testid="stMarkdownContainer"] h4,
-    [data-testid="stMarkdownContainer"] h5,
-    [data-testid="stMarkdownContainer"] li,
-    details summary,
-    [data-testid="stExpander"] p { color: var(--ink) !important; }
-    [data-testid="stCaptionContainer"] p,
-    [data-testid="stSpinner"] p,
-    details { color: var(--muted) !important; }
 
     button[data-baseweb="tab"] {
         font-size: 14px;
@@ -427,7 +255,6 @@ DARK_CSS = """
 
     .stat-card {
         background: var(--card);
-        border: 1px solid var(--line);
         border-radius: 16px;
         padding: 18px 20px 20px;
         height: 100%;
@@ -490,22 +317,85 @@ DARK_CSS = """
         line-height: 1.8;
     }
     .footer a { color: var(--ink); text-decoration: none; }
+
+    /* Result status badges */
+    .res-badge {
+        display: inline-block;
+        padding: 2px 10px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: .04em;
+    }
+    .res-Finished { background: #DDF3E4; color: #1D7A3B; }
+    .res-DNF { background: #FDE4E4; color: #B30000; }
+    .res-DSQ { background: #1D1D1F; color: #FFFFFF; }
+    .res-DNS { background: #FFF3E0; color: #B56A00; }
+    .res-DNQ { background: #EDEDEF; color: #6E6E73; }
+    .res-Unknown, .res-NotClassified { background: #EDEDEF; color: #6E6E73; }
 </style>
 """
 
-st.markdown(DARK_CSS if dark else LIGHT_CSS, unsafe_allow_html=True)
+st.markdown(LIGHT_CSS, unsafe_allow_html=True)
 
 
 def apple_table(df: pd.DataFrame) -> None:
     """Render a DataFrame as a smooth, static Apple-style table."""
+    float_cols = {c: "{:.2f}" for c in df.select_dtypes(include="float").columns}
     styled = (
         df.style
         .hide(axis='index')
-        .format({df.columns[-1]: '{:.2f}'})
+        .format(float_cols)
         .set_table_attributes('class="apple-table"')
         .to_html(border=0)
     )
     st.markdown(f"<div class='table-wrap'>{styled}</div>", unsafe_allow_html=True)
+
+
+def result_badge(status_class: str) -> str:
+    """Render a status badge span for the result table."""
+    safe = "".join(c for c in str(status_class) if c.isalnum() or c == "_")
+    return f"<span class='res-badge res-{safe}'>{str(status_class)}</span>"
+
+
+def result_table(results: pd.DataFrame) -> None:
+    """Render the official classification with coloured status badges."""
+    rows_html = []
+    for _, r in results.iterrows():
+        pos = int(r["Position"]) if pd.notna(r["Position"]) else "–"
+        grid = int(r["Grid"]) if pd.notna(r["Grid"]) else "–"
+        delta = ""
+        if pd.notna(r["Position"]) and pd.notna(r["Grid"]):
+            diff = int(r["Grid"]) - int(r["Position"])
+            if diff > 0:
+                delta = f"<span style='color:#1D7A3B;font-weight:600'>▲ {diff}</span>"
+            elif diff < 0:
+                delta = f"<span style='color:#B30000;font-weight:600'>▼ {abs(diff)}</span>"
+            else:
+                delta = "<span style='color:#86868B'>–</span>"
+        points = f"{float(r['Points']):g}" if pd.notna(r["Points"]) else ""
+        laps = int(r["Laps"]) if pd.notna(r["Laps"]) else "–"
+        full = r["FullName"] if pd.notna(r["FullName"]) else ""
+        team = r["Team"] if pd.notna(r["Team"]) else ""
+        rows_html.append(
+            f"<tr>"
+            f"<td>{pos}</td>"
+            f"<td><b>{r['Driver']}</b> <span style='color:#86868B;font-size:12px'>{full}</span></td>"
+            f"<td>{team}</td>"
+            f"<td>{grid}</td>"
+            f"<td>{delta}</td>"
+            f"<td>{result_badge(r['StatusClass'])}</td>"
+            f"<td>{points}</td>"
+            f"<td>{laps}</td>"
+            f"</tr>"
+        )
+    st.markdown(
+        "<div class='table-wrap'><table class='apple-table'>"
+        "<thead><tr><th>Pos</th><th>Driver</th><th>Team</th><th>Grid</th>"
+        "<th>± vs grid</th><th>Status</th><th>Pts</th><th>Laps</th></tr></thead>"
+        f"<tbody>{''.join(rows_html)}</tbody></table></div>",
+        unsafe_allow_html=True,
+    )
 
 
 # ============================================================================
@@ -580,30 +470,119 @@ if not selected_drivers:
 st.markdown("---")
 
 # ============================================================================
-# TABS: MAIN ANALYSIS
+# TABS: RACE STORY + ANALYSIS
 # ============================================================================
 
-tab_pace, tab_tyre, tab_pits, tab_stats = st.tabs(["Pace", "Tyres", "Pit Stops", "Driver Stats"])
+tab_story, tab_pace, tab_tyre, tab_pits, tab_stats, tab_result = st.tabs(
+    ["Race Story", "Pace", "Tyres", "Pit Stops", "Driver Stats", "Result"]
+)
 
 # ============================================================================
-# TAB 1: RACE PACE
+# TAB 1: RACE STORY
+# ============================================================================
+
+with tab_story:
+    with st.expander("New here? F1 terms, in plain English"):
+        st.markdown("""
+        | Term | What it means |
+        |---|---|
+        | **Lap time** | How long one lap took. A stopwatch — **lower is better**. |
+        | **Compound** | The tyre type: SOFT (red, fastest but wears quickest), MEDIUM (orange, balanced), HARD (grey, slowest but lasts longest). |
+        | **Stint** | The laps a driver runs on one set of tyres before pitting. |
+        | **Pit stop** | Coming in to change tyres — it costs time now to gain time (fresher tyres) later. |
+        | **Tyre life / tyre age** | How old the current set is, in laps driven. |
+        | **Delta** | A difference. Negative = faster than the reference; positive = slower. |
+        | **Typical lap (median)** | The middle value of a driver's laps — a fair "normal pace" that ignores one-off fast or slow laps. |
+        | **Consistency** | How much lap times bounce around (standard deviation). Lower = steadier. |
+        | **Tyre wear (s/lap)** | Pace lost per extra lap on the same set, read from the slope of the pace line. |
+        """)
+
+    st.markdown("##### Race in one read")
+    story = get_race_narrative(laps)
+    tightness = (
+        "competitive"
+        if story["field_tightness"] < 1.0
+        else "processional"
+        if story["field_tightness"] > 2.5
+        else "moderately stratified"
+    )
+    st.markdown(
+        f"""
+        <p class='hero-subtitle' style='max-width:none'>
+        {story['fastest_driver']} turned the fastest lap of the race, a
+        {story['fastest_lap']:.3f}s effort on lap {story['fastest_lap_number']}.
+        On sustained pace, <b>{story['pace_leader']}</b> led the field with a
+        typical lap of {story['pace_median']:.3f}s. {story['most_consistent']}
+        was the steadiest hand on the wheel ({story['most_consistent_std']:.3f}s
+        spread between their best and worst laps), while
+        {story['most_volatile']} was the most uneven ({story['most_volatile_std']:.3f}s).
+        A spread of {story['field_tightness']:.2f}s between drivers' typical
+        laps makes this a {tightness} race. The single biggest slowdown against
+        a driver's own typical pace belonged to {story['swing_driver']} on lap
+        {story['swing_lap']} — {story['swing_seconds']:.3f}s.
+        </p>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("##### Relative pace vs the field")
+    st.caption("Each driver's lap time minus the field median for that lap. "
+               "Below zero = faster than the midfield reference.")
+    st.plotly_chart(plot_field_delta(laps, selected_drivers), use_container_width=True)
+    with st.expander("How to read: relative pace"):
+        st.markdown("""
+        - For every race lap we take the **median (midpoint) lap time across all drivers**. That's the "field".
+        - Each line is a selected driver **minus that reference**: below 0 → faster than the average field that lap; above → slower.
+        - **Falling line** = gaining on the field (fresh tyres, clear air). **Rising line** = losing time (tyre wear, traffic, an error).
+        - **Sharp one-lap spikes** are usually incidents or lapped traffic — those are your story moments.
+        - The dashed line at 0 is the midfield reference — hover any point to see the exact delta, stint and compound.
+        """)
+
+    st.markdown("##### Strategy map")
+    st.caption("Stint lengths per driver, coloured by compound: red SOFT, "
+               "orange MEDIUM, grey HARD, green INTERMEDIATE, blue WET.")
+    st.plotly_chart(plot_strategy_grid(laps, selected_drivers), use_container_width=True)
+    with st.expander("How to read: strategy map"):
+        st.markdown("""
+        - Each **row is one driver**; each **coloured block is one stint** — the laps they ran on a single set of tyres.
+        - **Gaps between blocks** are pit stops: while in the pits the driver isn't producing pace, so the block just ends.
+        - Colours = compound. **Few long blocks** = conservative, tyre-saving strategy. **Many short blocks** = aggressive, push-hard strategy.
+        - Hover a block to see the exact stints lap range and compound.
+        """)
+
+    st.markdown("##### Stint pace")
+    st.caption("Tyre wear (s/lap) is how much pace is lost per extra lap on "
+               "that compound — small or negative means healthy tyres.")
+    stint_table = get_stint_summary(laps)
+    stint_table = stint_table[stint_table["Driver"].isin(selected_drivers)]
+    apple_table(stint_table)
+    with st.expander("How to read: stint pace table"):
+        st.markdown("""
+        - One row per **stint** (a driver's run on one set of tyres).
+        - **Avg lap / Best lap (s)** — the normal and the fastest lap of that stint. Lower = faster.
+        - **Tyre wear (s/lap)** — the slope of the pace line on that set. Around 0 = tyres holding up well; clearly positive = heavy wear; negative (rare) = getting faster as the stint went on.
+        - Compare **the same compound across drivers** to see who manages tyres best — that's where races are won.
+        """)
+
+# ============================================================================
+# TAB 2: RACE PACE
 # ============================================================================
 
 with tab_pace:
     st.markdown("##### Lap time evolution")
-    st.caption("How each driver’s pace unfolds, lap by lap.")
-    st.plotly_chart(plot_pace_analysis(laps, selected_drivers, dark=dark), use_container_width=True)
+    st.caption("How each driver's pace unfolds, lap by lap. **Lower = faster** — lap time is a stopwatch.")
+    st.plotly_chart(plot_pace_analysis(laps, selected_drivers), use_container_width=True)
 
-    with st.expander("What to look for"):
+    with st.expander("How to read this chart"):
         st.markdown("""
-        - **A downward trend** — fresh rubber, or a strong phase of the race
-        - **An upward trend** — degradation starting to bite
-        - **A flat line** — consistent, controlled pace
-        - **Sharp spikes** — traffic, errors or strategy moments
+        - Each **line is a driver** and each dot is **one lap time**.
+        - **Going down = getting faster** (fresh tyres, clear track). **Going up = getting slower** (tyre wear, traffic, an error).
+        - A low, flat line = fast and consistent. A jagged line = eventful race.
+        - Hover any point to see the **compound** and **tyre age** for that lap.
         """)
 
 # ============================================================================
-# TAB 2: TYRE DEGRADATION
+# TAB 3: TYRE DEGRADATION
 # ============================================================================
 
 with tab_tyre:
@@ -616,7 +595,14 @@ with tab_tyre:
         key="tyre_driver",
     )
 
-    st.plotly_chart(plot_tyre_degradation(laps, selected_driver_tyre, dark=dark), use_container_width=True)
+    st.plotly_chart(plot_tyre_degradation(laps, selected_driver_tyre), use_container_width=True)
+    with st.expander("How to read this chart"):
+        st.markdown("""
+        - **X axis**: how old this set of tyres is (laps driven). **Y axis**: lap time — lower = faster.
+        - **A rising line = degradation**: the tyres get slower the older they get.
+        - **A steeper line** means that compound (or this driver's style) eats tyres faster.
+        - **A flat line** means the tyres are holding up well — great tyre management.
+        """)
 
     stats = get_driver_stats(laps, selected_driver_tyre)
     if stats:
@@ -643,7 +629,7 @@ with tab_tyre:
                     )
 
 # ============================================================================
-# TAB 3: PIT STOPS
+# TAB 4: PIT STOPS
 # ============================================================================
 
 with tab_pits:
@@ -669,6 +655,12 @@ with tab_pits:
         display[time_col] = display['StopTime'] if 'StopTime' in display.columns else display['LapTimeSeconds']
 
         apple_table(display[['Driver', 'Lap', 'Compound', time_col]])
+        with st.expander("How to read this table"):
+            st.markdown("""
+            - One row per **pit stop**. **Lap** = when the stop happened, **Compound** = old → new tyre (`?` = unknown).
+            - **Stop (s)** = time spent in the pit box (official timing). When timing isn't available, 'Pit lap (s)' is shown instead — the slow in-lap, which includes the pit-lane speed limit.
+            - Short stop, right strategy moment → big race impact. The bar chart below counts stops per driver.
+            """)
 
         pit_count = pit_stops[pit_stops['Driver'].isin(selected_drivers)].groupby('Driver').size().reset_index(name='count')
 
@@ -686,14 +678,14 @@ with tab_pits:
             xaxis_title='Driver',
             yaxis_title='Stops',
             height=400,
-            **chart_theme(dark),
+            **chart_theme(),
         )
         st.plotly_chart(fig_pits, use_container_width=True)
     else:
         st.info("No pit stops detected in this race.")
 
 # ============================================================================
-# TAB 4: DRIVER STATS
+# TAB 5: DRIVER STATS
 # ============================================================================
 
 with tab_stats:
@@ -715,8 +707,47 @@ with tab_stats:
 
     if stats_data:
         apple_table(pd.DataFrame(stats_data))
+        with st.expander("How to read this table"):
+            st.markdown("""
+            - **Best (s)** — fastest single lap of the race (lower = better).
+            - **Average / Median (s)** — typical pace. Median ignores one-off fast/slow laps.
+            - **Consistency (s)** — how much laps bounce around the average. Lower = steadier driver, kinder to tyres.
+            - **Laps** — how many valid laps were counted for this driver.
+            """)
     else:
         st.warning("No stats available for these drivers.")
+
+# ============================================================================
+# TAB 6: RACE RESULT / CLASSIFICATION
+# ============================================================================
+
+with tab_result:
+    st.markdown("##### Official classification")
+    st.caption("Final standings with grid comparison and race status.")
+
+    if not use_db:
+        st.info("Race results are served from the warehouse. Switch the data source "
+                "to Auto or Supabase warehouse.")
+    else:
+        results = load_race_results(year, race_name)
+        if results.empty:
+            st.info(
+                f"No results in the warehouse for {year} {race_name} yet. "
+                "Run `python ingest/ingest_to_supabase.py --year {year}` to add them."
+            )
+        else:
+            result_table(results)
+            with st.expander("How to read this table"):
+                st.markdown("""
+                - **Pos** — official finish position. No number = not classified (retired or excluded).
+                - **± vs grid** — places gained (▲) or lost (▼) compared to where they started.
+                - **Status badges** — green **Finished**, red **DNF** (did not finish),
+                  black **DSQ** (disqualified), orange **DNS** (did not start),
+                  grey **DNQ** (did not qualify).
+                - **Pts** — championship points scored. **Laps** — how many laps completed.
+                - DNF drivers' laps are still available in the Pace/Tyres tabs —
+                  partial races are valuable data too.
+                """)
 
 # ============================================================================
 # FOOTER

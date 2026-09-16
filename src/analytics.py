@@ -4,6 +4,7 @@ Provides utilities for pace analysis, tyre degradation, and pit stop detection.
 """
 
 import fastf1
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -379,3 +380,201 @@ def get_driver_stats(laps: pd.DataFrame, driver: str) -> dict:
         'total_laps': len(driver_laps),
         'median_lap': driver_laps.median()
     }
+
+
+# ============================================================================
+# RACE STORYTELLING LAYER
+# ============================================================================
+
+COMPOUND_COLORS = {
+    "SOFT": "#E10600",
+    "MEDIUM": "#F5A623",
+    "HARD": "#9D9DA3",
+    "INTERMEDIATE": "#34C759",
+    "WET": "#2E86DE",
+}
+
+
+def derive_stints(laps: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add a Stint column: increments when a driver's compound changes.
+
+    A stint is a run of consecutive laps on the same compound, so a pit
+    stop (compound change, or a gap from the inlap) starts a new stint.
+    """
+    df = laps.sort_values(["Driver", "LapNumber"]).copy()
+    compound_changed = df["Compound"] != df.groupby("Driver")["Compound"].shift()
+    df["Stint"] = compound_changed.groupby(df["Driver"]).cumsum().astype(int)
+    return df.sort_index()
+
+
+def get_stint_summary(laps: pd.DataFrame) -> pd.DataFrame:
+    """
+    Per-driver, per-stint statistics, including a linear degradation slope.
+
+    Tyre wear (s/lap) is the slope of lap time against tyre life (least squares),
+    i.e. how many seconds the driver loses per extra lap on that compound.
+    Needs at least 3 laps and varying tyre life; otherwise it stays empty.
+    """
+    df = derive_stints(laps)
+    rows = []
+    for (driver, stint), group in df.groupby(["Driver", "Stint"], sort=False):
+        times = group["LapTimeSeconds"]
+        deg = None
+        if len(times) >= 3 and group["TyreLife"].nunique() > 1:
+            slope = np.polyfit(group["TyreLife"], times, 1)
+            deg = round(float(slope[0]), 3)
+        rows.append(
+            {
+                "Driver": driver,
+                "Stint": stint,
+                "Compound": group["Compound"].iloc[0],
+                "Laps": len(group),
+                "LapRange": f"{group['LapNumber'].min()}-{group['LapNumber'].max()}",
+                "Avg lap (s)": round(float(times.mean()), 3),
+                "Best lap (s)": round(float(times.min()), 3),
+                "Tyre wear (s/lap)": deg,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def get_field_pace_delta(laps: pd.DataFrame, driver: str) -> pd.DataFrame:
+    """
+    Per-lap delta between one driver's lap time and the field median for
+    that lap. Negative means faster than the midfield reference.
+    """
+    if "Stint" not in laps.columns:
+        laps = derive_stints(laps)
+    med = laps.groupby("LapNumber")["LapTimeSeconds"].transform("median")
+    d = laps[laps["Driver"] == driver].copy()
+    d["DeltaSeconds"] = d["LapTimeSeconds"] - med
+    return d[["LapNumber", "Stint", "Compound", "DeltaSeconds"]].reset_index(drop=True)
+
+
+def get_race_narrative(laps: pd.DataFrame) -> dict:
+    """Metrics that tell this race as a story (fastest lap, pace leader, ...)."""
+    counts = laps.groupby("Driver")["LapTimeSeconds"].count()
+    medians = laps.groupby("Driver")["LapTimeSeconds"].median()
+    stds = laps.groupby("Driver")["LapTimeSeconds"].std(ddof=1)
+
+    qualified = medians[counts >= 3]
+    if qualified.empty:
+        qualified = medians
+
+    fastest_idx = laps["LapTimeSeconds"].idxmin()
+    fastest = laps.loc[fastest_idx]
+
+    d = laps.copy()
+    d["Median"] = d.groupby("Driver")["LapTimeSeconds"].transform("median")
+    swing_series = (d["LapTimeSeconds"] - d["Median"]).sort_values(ascending=False)
+    swing_row = d.loc[swing_series.index[0]]
+
+    return {
+        "race_laps": int(laps["LapNumber"].max()),
+        "drivers": int(laps["Driver"].nunique()),
+        "valid_laps": len(laps),
+        "fastest_driver": fastest["Driver"],
+        "fastest_lap": float(fastest["LapTimeSeconds"]),
+        "fastest_lap_number": int(fastest["LapNumber"]),
+        "pace_leader": qualified.idxmin(),
+        "pace_median": float(qualified.min()),
+        "most_consistent": stds.idxmin(),
+        "most_consistent_std": float(stds.min()),
+        "most_volatile": stds.idxmax(),
+        "most_volatile_std": float(stds.max()),
+        "field_tightness": float(medians.std(ddof=1)),
+        "swing_driver": swing_row["Driver"],
+        "swing_lap": int(swing_row["LapNumber"]),
+        "swing_seconds": float(swing_series.iloc[0]),
+    }
+
+
+def plot_field_delta(laps: pd.DataFrame, drivers: List[str]) -> go.Figure:
+    """
+    Relative pace chart: each driver's lap time minus the field median
+    for that lap. Zero line = the midfield reference; below is faster.
+    A rising line means being out-paced by the field, a falling one
+    means gaining. Cleanly shows undercuts, degradation and lost-lap events.
+    """
+    if "Stint" not in laps.columns:
+        laps = derive_stints(laps)
+    med = laps.groupby("LapNumber")["LapTimeSeconds"].transform("median")
+
+    fig = go.Figure()
+    for i, driver in enumerate(drivers):
+        d = laps[laps["Driver"] == driver].sort_values("LapNumber")
+        if d.empty:
+            continue
+        fig.add_trace(
+            go.Scatter(
+                x=d["LapNumber"],
+                y=d["LapTimeSeconds"] - med[d.index],
+                mode="lines+markers",
+                name=driver,
+                line=dict(width=2, color=ACCENT_CYCLIC[i % len(ACCENT_CYCLIC)]),
+                marker=dict(size=5),
+                customdata=d[["Stint", "Compound"]],
+                hovertemplate=(
+                    "<b>%{fullData.name}</b><br>Lap %{x}<br>"
+                    "Delta: %{y:+.3f}s<br>Stint %{customdata[0]} · %{customdata[1]}"
+                    "<extra></extra>"
+                ),
+            )
+        )
+
+    fig.add_hline(y=0, line_dash="dash", line_color="#6E6E73", opacity=0.6)
+    fig.update_layout(
+        xaxis_title="Lap number",
+        yaxis_title="Delta vs field median (s)",
+        height=480,
+        **chart_theme(),
+    )
+    return fig
+
+
+def plot_strategy_grid(laps: pd.DataFrame, drivers: List[str]) -> go.Figure:
+    """
+    F1-style strategy map: horizontal stint bars per driver, coloured by
+    compound, spanning the laps each stint covered. One glance answers
+    'who pitted when, and onto what'.
+    """
+    df = derive_stints(laps)
+    fig = go.Figure()
+    for driver in drivers:
+        d = df[df["Driver"] == driver]
+        if d.empty:
+            continue
+        for stint, g in d.groupby("Stint", sort=True):
+            start = int(g["LapNumber"].min())
+            end = int(g["LapNumber"].max())
+            compound = g["Compound"].iloc[0]
+            fig.add_trace(
+                go.Bar(
+                    y=[driver],
+                    x=[end - start + 1],
+                    base=[start],
+                    orientation="h",
+                    marker=dict(color=COMPOUND_COLORS.get(compound, "#A2845E")),
+                    customdata=[[compound, start, end]],
+                    hovertemplate=(
+                        f"<b>{driver}</b><br>{compound}"
+                        "<br>Laps %{customdata[1]}-%{customdata[2]}"
+                        "<extra></extra>"
+                    ),
+                    width=0.55,
+                    showlegend=False,
+                )
+            )
+
+    fig.update_layout(
+        barmode="overlay",
+        xaxis_title="Race lap",
+        yaxis_title="Driver",
+        height=280 + 26 * max(len(drivers), 1),
+        **chart_theme(),
+    )
+    # chart_theme() already sets a default yaxis, so reverse the axis
+    # via the axis accessor to avoid a duplicate-'yaxis' kwarg.
+    fig.update_yaxes(autorange="reversed")
+    return fig

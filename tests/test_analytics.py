@@ -1,10 +1,15 @@
 import pandas as pd
+import pytest
 
 from src.analytics import (
     get_driver_stats,
     get_pit_stops,
     plot_pace_analysis,
     plot_tyre_degradation,
+    derive_stints,
+    get_stint_summary,
+    get_field_pace_delta,
+    get_race_narrative,
 )
 
 
@@ -102,3 +107,36 @@ def test_get_pit_stops_returns_empty_schema_without_changes() -> None:
         "CompoundOut",
         "LapTimeSeconds",
     ]
+
+
+def test_derive_stints_increments_on_compound_change() -> None:
+    stints = derive_stints(sample_laps())
+
+    ver = stints[stints["Driver"] == "VER"].sort_values("LapNumber")
+    assert list(ver["Stint"]) == [1, 1, 2]  # MEDIUM, MEDIUM, HARD
+    assert ver["Stint"].dtype.kind == "i"
+
+
+def test_get_stint_summary_reports_compound_and_average() -> None:
+    summary = get_stint_summary(sample_laps())
+
+    ver_stint_1 = summary[(summary["Driver"] == "VER") & (summary["Stint"] == 1)]
+    assert ver_stint_1["Compound"].iloc[0] == "MEDIUM"
+    assert ver_stint_1["Avg lap (s)"].iloc[0] == pytest.approx((92.1 + 92.4) / 2)
+
+
+def test_get_field_pace_delta_negative_when_faster_than_field() -> None:
+    delta = get_field_pace_delta(sample_laps(), "VER")
+
+    lap1 = delta[delta["LapNumber"] == 1].iloc[0]
+    # VER 92.1 vs field median of (92.1, 93.5) = 92.8 -> faster (negative)
+    assert lap1["DeltaSeconds"] == pytest.approx(92.1 - 92.8)
+
+
+def test_get_race_narrative_returns_story_metrics() -> None:
+    story = get_race_narrative(sample_laps())
+
+    assert story["fastest_driver"] == "VER"
+    assert story["fastest_lap"] == 92.1
+    assert story["pace_leader"] == "VER"
+    assert story["swing_driver"] == "VER"

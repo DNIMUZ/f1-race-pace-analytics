@@ -1,10 +1,12 @@
 """
 ETL: FastF1 API -> Supabase Postgres (star schema) for Power BI.
 
-Transforms raw F1 laps into three star-schema tables:
+Transforms raw F1 laps into four star-schema tables:
     races    (dimension)  season, round, name, location, date, total laps
     drivers  (dimension)  season, driver code, number, full name, team
     laps     (fact)       one row per lap per driver per race
+    results  (fact)       official classification: position, grid, status
+                          (Finished / DNF / DNS / DSQ / DNQ ...), points
 
 Usage (run from the repo root):
     # Upsert into Supabase Postgres (uses .env SUPABASE_DATABASE_URL)
@@ -80,6 +82,10 @@ def load_sessions(year, skip_failed=True):
         # Races that haven't happened yet have no timing data; skip them
         # upfront instead of burning API calls that are doomed to fail.
         session_date = event.get("Session5Date")
+        if pd.isna(session_date):
+            # Some early schedules lack Session5Date; the weekend date is
+            # a reliable enough 'has this race passed' proxy.
+            session_date = event.get("EventDate")
         if pd.notna(session_date):
             try:
                 if pd.Timestamp(session_date) > pd.Timestamp.now():
@@ -187,6 +193,103 @@ def _cell(series, key, numpy_compatible=False):
     return value
 
 
+def _int_or_none(value):
+    if value is None:
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    if pd.isna(f):
+        return None
+    return int(f)
+
+
+def _float_or_none(value):
+    if value is None:
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    if pd.isna(f):
+        return None
+    return f
+
+
+def _result_rows(session, race_round):
+    """
+    Official classification from FastF1 session.results: finish position,
+    grid position, status (Finished / DNF / DNS / DSQ / DNQ / ...), points.
+
+    Includes drivers who never started or weren't classified, so the full
+    story of a race weekend (DNS, DSQ, DNQ included) is preserved.
+    """
+    try:
+        results = session.results
+    except Exception:  # noqa: BLE001 - results may be missing on blocked APIs
+        return []
+    if results is None or results.empty:
+        return []
+
+    # FastF1's results do not always include a Laps count; fall back to
+    # counting the driver's lap rows from the already-loaded session.
+    lap_counts = {}
+    try:
+        if session.laps is not None and not session.laps.empty:
+            lap_counts = session.laps.groupby("Driver").size().to_dict()
+    except Exception:  # noqa: BLE001
+        lap_counts = {}
+
+    season = int(session.event["EventDate"].year)
+    rows = []
+    for _, r in results.iterrows():
+        code = r.get("Abbreviation") or r.get("DriverNumber")
+        laps = _int_or_none(r.get("Laps"))
+        if laps is None and code is not None:
+            laps = lap_counts.get(code)
+        rows.append(
+            {
+                "race_season": season,
+                "race_round": race_round,
+                "driver_code": code if code is not None else "?",
+                "full_name": _cell(r, "FullName"),
+                "team": _cell(r, "TeamName"),
+                "grid_position": _int_or_none(r.get("GridPosition")),
+                "position": _int_or_none(r.get("Position")),
+                "classified_position": _cell(r, "ClassifiedPosition"),
+                "status": _cell(r, "Status"),
+                "points": _float_or_none(r.get("Points")),
+                "laps": laps,
+            }
+        )
+    return rows
+
+
+RESULTS_DDL = """
+CREATE TABLE IF NOT EXISTS public.results (
+    race_season         integer NOT NULL,
+    race_round          integer NOT NULL,
+    driver_code         text    NOT NULL,
+    full_name           text,
+    team                text,
+    grid_position       integer,
+    position            integer,
+    classified_position text,
+    status              text,
+    points              numeric,
+    laps                integer,
+    PRIMARY KEY (race_season, race_round, driver_code)
+);
+"""
+
+
+def _ensure_results_table(conn):
+    with conn.cursor() as cur:
+        cur.execute(RESULTS_DDL)
+    logger.info("Ensured public.results exists")
+
+
 def _td_seconds(value):
     if value is None:
         return None
@@ -255,7 +358,7 @@ def main():
         conn = psycopg2.connect(db_url)
         conn.autocommit = True
 
-    race_rows, driver_rows, lap_rows = [], [], []
+    race_rows, driver_rows, lap_rows, result_rows = [], [], [], []
     try:
         for event, session in load_sessions(args.year):
             event_name = event.get("EventName", "?")
@@ -263,13 +366,18 @@ def main():
                 rr = _race_row(event, session)
                 drows = _driver_rows(session, rr["round_number"])
                 lrows = _lap_rows(session, rr["round_number"])
+                resrows = _result_rows(session, rr["round_number"])
             except Exception as exc:  # noqa: BLE001 - one bad race must not kill the run
                 logger.warning(f"Skipping {event_name}: {exc}")
                 continue
             race_rows.append(rr)
             driver_rows.extend(drows)
             lap_rows.extend(lrows)
-            logger.info(f"{rr['name']}: {len(lrows)} laps, {len(drows)} drivers")
+            result_rows.extend(resrows)
+            logger.info(
+                f"{rr['name']}: {len(lrows)} laps, {len(drows)} drivers, "
+                f"{len(resrows)} results"
+            )
     finally:
         if conn:
             conn.close()
@@ -278,14 +386,17 @@ def main():
         write_csv(race_rows, "races.csv")
         write_csv(driver_rows, "drivers.csv")
         write_csv(lap_rows, "laps.csv")
+        write_csv(result_rows, "results.csv")
         logger.info("CSV export complete.")
         return
 
     conn = psycopg2.connect(os.getenv("SUPABASE_DATABASE_URL"))
     conn.autocommit = True
+    _ensure_results_table(conn)
     upsert_df(conn, "races", race_rows, ["season", "round_number"])
     upsert_df(conn, "drivers", driver_rows, ["race_season", "race_round", "driver_code"])
     upsert_df(conn, "laps", lap_rows, ["race_season", "race_round", "driver_code", "lap_number"])
+    upsert_df(conn, "results", result_rows, ["race_season", "race_round", "driver_code"])
     conn.close()
     logger.info("Supabase upsert complete.")
 
