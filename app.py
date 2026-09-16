@@ -33,6 +33,10 @@ st.set_page_config(
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+# Keep Streamlit/FastF1's own noisy loggers (they emit DEBUG tracebacks on
+# live-source loads) from cluttering the console; app's own logger stays INFO.
+for _noisy in ("fastf1", "matplotlib", "urllib3"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 
 # ============================================================================
 # SIDEBAR: DATA SOURCE + RACE SELECTION

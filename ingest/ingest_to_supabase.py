@@ -37,6 +37,11 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger("ingest")
+# FastF1 ships its own logger that emits lengthy DEBUG tracebacks on every
+# doomed dataset load (future races / blocked sessions). Those bloat the
+# ingest output without helping; keep our "ingest" logger at INFO and drop
+# FastF1's chatter to WARNING so a normal run stays readable.
+logging.getLogger("fastf1").setLevel(logging.WARNING)
 
 LAP_COLUMNS = [
     "race_season",
@@ -88,11 +93,16 @@ def load_sessions(year, skip_failed=True):
             session_date = event.get("EventDate")
         if pd.notna(session_date):
             try:
-                if pd.Timestamp(session_date) > pd.Timestamp.now():
+                ts = pd.Timestamp(session_date)
+                # FastF1 dates are tz-aware (UTC); a naive `now()` would raise
+                # TypeError and fall through to a doomed API call. Compare in
+                # the same tz as the schedule so the skip actually fires.
+                now = pd.Timestamp.now(tz=ts.tz) if ts.tz else pd.Timestamp.now()
+                if ts > now:
                     logger.info(f"Skipping {event_name} (future race, no data yet)")
                     continue
-            except TypeError:
-                pass  # tz-aware vs naive comparison; let the API decide below
+            except (TypeError, ValueError):
+                pass  # unparseable; let the API decide below
         try:
             session = fastf1.get_session(year, event_name, "R")
             logger.info(f"Loading {year} {event_name} ...")
