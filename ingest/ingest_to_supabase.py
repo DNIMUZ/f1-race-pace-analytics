@@ -77,6 +77,16 @@ def load_sessions(year, skip_failed=True):
         if "testing" in str(event.get("OfficialEventName", "")).lower():
             logger.info(f"Skipping {event_name} (testing session)")
             continue
+        # Races that haven't happened yet have no timing data; skip them
+        # upfront instead of burning API calls that are doomed to fail.
+        session_date = event.get("Session5Date")
+        if pd.notna(session_date):
+            try:
+                if pd.Timestamp(session_date) > pd.Timestamp.now():
+                    logger.info(f"Skipping {event_name} (future race, no data yet)")
+                    continue
+            except TypeError:
+                pass  # tz-aware vs naive comparison; let the API decide below
         try:
             session = fastf1.get_session(year, event_name, "R")
             logger.info(f"Loading {year} {event_name} ...")
@@ -95,6 +105,11 @@ def load_sessions(year, skip_failed=True):
 
 
 def _race_row(event, session):
+    total_laps = None
+    try:
+        total_laps = int(session.total_laps) if session.total_laps else None
+    except Exception:  # noqa: BLE001 - unloaded/future sessions provide no lap count
+        pass
     return {
         "season": int(session.event["EventDate"].year),
         "round_number": int(session.event.get("RoundNumber", 0)),
@@ -103,7 +118,7 @@ def _race_row(event, session):
         "country": event.get("Country", ""),
         "location": event.get("Location", ""),
         "event_date": session.event["EventDate"].date(),
-        "total_laps": int(session.total_laps) if session.total_laps else None,
+        "total_laps": total_laps,
     }
 
 
@@ -243,11 +258,16 @@ def main():
     race_rows, driver_rows, lap_rows = [], [], []
     try:
         for event, session in load_sessions(args.year):
-            rr = _race_row(event, session)
+            event_name = event.get("EventName", "?")
+            try:
+                rr = _race_row(event, session)
+                drows = _driver_rows(session, rr["round_number"])
+                lrows = _lap_rows(session, rr["round_number"])
+            except Exception as exc:  # noqa: BLE001 - one bad race must not kill the run
+                logger.warning(f"Skipping {event_name}: {exc}")
+                continue
             race_rows.append(rr)
-            drows = _driver_rows(session, rr["round_number"])
             driver_rows.extend(drows)
-            lrows = _lap_rows(session, rr["round_number"])
             lap_rows.extend(lrows)
             logger.info(f"{rr['name']}: {len(lrows)} laps, {len(drows)} drivers")
     finally:

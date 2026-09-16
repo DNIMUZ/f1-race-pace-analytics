@@ -653,15 +653,22 @@ with tab_pits:
     pit_stops = get_pit_stops(laps)
 
     if not pit_stops.empty:
-        pit_stops_filtered = pit_stops[pit_stops['Driver'].isin(selected_drivers)].sort_values('LapNumber')
-        apple_table(
-            pit_stops_filtered.rename(columns={
-                'Driver': 'Driver',
-                'LapNumber': 'Lap',
-                'CompoundOut': 'Compound',
-                'LapTimeSeconds': 'Pit lap time (s)'
-            })
+        pit_stops_filtered = (
+            pit_stops[pit_stops['Driver'].isin(selected_drivers)]
+            .sort_values('LapNumber')
+            .copy()
         )
+
+        display = pit_stops_filtered.rename(columns={'LapNumber': 'Lap'})
+        display['Compound'] = (
+            display['CompoundIn'].fillna('?') + ' → ' + display['CompoundOut'].fillna('?')
+            if 'CompoundIn' in display.columns
+            else display['CompoundOut']
+        )
+        time_col = 'Stop (s)' if 'StopTime' in display.columns else 'Pit lap (s)'
+        display[time_col] = display['StopTime'] if 'StopTime' in display.columns else display['LapTimeSeconds']
+
+        apple_table(display[['Driver', 'Lap', 'Compound', time_col]])
 
         pit_count = pit_stops[pit_stops['Driver'].isin(selected_drivers)].groupby('Driver').size().reset_index(name='count')
 

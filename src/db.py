@@ -32,6 +32,8 @@ COLUMN_MAP = {
     "lap_time_seconds": "LapTimeSeconds",
     "compound": "Compound",
     "tyre_life": "TyreLife",
+    "pit_in_time": "PitInTime",
+    "pit_out_time": "PitOutTime",
 }
 
 
@@ -110,7 +112,8 @@ def load_race_from_db(season: int, race_name: str) -> pd.DataFrame:
     """
     query = """
         select l.driver_code, l.lap_number, l.lap_time_seconds,
-               l.compound, l.tyre_life
+               l.compound, l.tyre_life,
+               l.pit_in_time, l.pit_out_time
         from public.laps l
         join public.races r
           on r.season = l.race_season

@@ -126,6 +126,10 @@ def load_race_data(year: int, race: str) -> pd.DataFrame:
         # Convert LapTime to seconds for easier analysis
         laps['LapTimeSeconds'] = laps['LapTime'].dt.total_seconds()
 
+        # Keep official pit-lane timing in seconds so pit stops can be detected
+        # from timing data instead of compound-change heuristics.
+        laps = _expose_pit_timing(laps)
+
         # Filter out invalid laps (pit stops, outlaps, etc.)
         laps = laps[laps['LapTimeSeconds'].notna()].copy()
 
@@ -228,42 +232,128 @@ def plot_tyre_degradation(laps: pd.DataFrame, driver: str, dark: bool = False) -
     return fig
 
 
+def _expose_pit_timing(laps: pd.DataFrame) -> pd.DataFrame:
+    """Convert FastF1 PitInTime/PitOutTime timedeltas into float seconds."""
+    for col in ("PitInTime", "PitOutTime"):
+        if col in laps.columns:
+            laps[col] = pd.to_timedelta(laps[col], errors="coerce").dt.total_seconds()
+    return laps
+
+
+# Canonical output schema for the two pit-stop detection methods.
+PIT_STOP_TIMING_COLUMNS = [
+    "Driver",
+    "LapNumber",
+    "CompoundIn",
+    "CompoundOut",
+    "PitInTime",
+    "PitOutTime",
+    "StopTime",
+]
+FALLBACK_COLUMNS = [
+    "Driver",
+    "LapNumber",
+    "CompoundIn",
+    "CompoundOut",
+    "LapTimeSeconds",
+]
+
+
+def _pit_stops_from_timing(laps: pd.DataFrame) -> pd.DataFrame:
+    """
+    Detect pit stops from official pit-lane timing (PitInTime/PitOutTime, seconds).
+
+    A stop is recorded on every lap where PitInTime is present (the inlap).
+    CompoundOut is the compound fitted afterwards, read from the outlap (the
+    next lap), along with its PitOutTime; StopTime is the elapsed pit time.
+    """
+    stops = laps[laps["PitInTime"].notna()].copy()
+    if stops.empty:
+        return pd.DataFrame(columns=PIT_STOP_TIMING_COLUMNS)
+
+    # Shift the outlap one lap back so it lines up with the pit-in lap:
+    # outlap row (LapNumber N+1) is keyed as N, attaching its compound and
+    # pit-exit time to the pit-in lap.
+    next_laps = laps[["Driver", "LapNumber", "Compound", "PitOutTime"]].copy()
+    next_laps["LapNumber"] = next_laps["LapNumber"] - 1
+
+    merged = stops.merge(
+        next_laps,
+        on=["Driver", "LapNumber"],
+        how="left",
+        suffixes=("", "_Next"),
+    )
+
+    rows = pd.DataFrame(
+        {
+            "Driver": merged["Driver"],
+            "LapNumber": merged["LapNumber"],
+            "CompoundIn": merged["Compound"],
+            "CompoundOut": merged["Compound_Next"],
+            "PitInTime": merged["PitInTime"],
+            "PitOutTime": merged["PitOutTime_Next"],
+            "StopTime": merged["PitOutTime_Next"] - merged["PitInTime"],
+        }
+    )
+    return rows.sort_values("LapNumber").reset_index(drop=True)
+
+
+def _pit_stops_from_compound_change(laps: pd.DataFrame) -> pd.DataFrame:
+    """
+    Heuristic fallback: detect pit stops as compound changes between consecutive laps.
+
+    Used when official pit-lane timing is missing (e.g. legacy CSV exports).
+    """
+    laps_sorted = laps.sort_values(["Driver", "LapNumber"]).copy()
+
+    pit_stops_list = []
+    for driver in laps_sorted["Driver"].unique():
+        driver_laps = laps_sorted[laps_sorted["Driver"] == driver].reset_index(drop=True)
+
+        for i in range(len(driver_laps) - 1):
+            current_compound = driver_laps.loc[i, "Compound"]
+            next_compound = driver_laps.loc[i + 1, "Compound"]
+
+            # Pit stop occurred if compound changed
+            if (
+                current_compound != next_compound
+                and pd.notna(current_compound)
+                and pd.notna(next_compound)
+            ):
+                pit_stops_list.append(
+                    {
+                        "Driver": driver,
+                        "LapNumber": driver_laps.loc[i, "LapNumber"],
+                        "CompoundIn": current_compound,
+                        "CompoundOut": next_compound,  # New tyre after pit stop
+                        "LapTimeSeconds": driver_laps.loc[i, "LapTimeSeconds"],
+                    }
+                )
+
+    if pit_stops_list:
+        return (
+            pd.DataFrame(pit_stops_list)
+            .sort_values("LapNumber")
+            .reset_index(drop=True)
+        )
+    return pd.DataFrame(columns=FALLBACK_COLUMNS)
+
+
 def get_pit_stops(laps: pd.DataFrame) -> pd.DataFrame:
     """
     Extract pit stop events from lap data.
-    Detects pit stops as moments where tyre compound changes between consecutive laps.
-    
-    Args:
-        laps: DataFrame with lap data
-    
-    Returns:
-        DataFrame with pit stop details (Driver, LapNumber, CompoundIn, CompoundOut, etc.)
+
+    Primary method: official pit-lane timing (PitInTime / PitOutTime, in
+    seconds) when available — records the inlap, compounds in/out and the
+    elapsed pit time. Falls back to compound-change detection for sources
+    without timing columns.
+
+    Returns a DataFrame with Driver, LapNumber, CompoundIn, CompoundOut plus
+    either StopTime/PitInTime/PitOutTime (timing) or LapTimeSeconds (fallback).
     """
-    laps_sorted = laps.sort_values(['Driver', 'LapNumber']).copy()
-    
-    # Detect pit stops: compound changes between consecutive laps
-    pit_stops_list = []
-    
-    for driver in laps_sorted['Driver'].unique():
-        driver_laps = laps_sorted[laps_sorted['Driver'] == driver].reset_index(drop=True)
-        
-        for i in range(len(driver_laps) - 1):
-            current_compound = driver_laps.loc[i, 'Compound']
-            next_compound = driver_laps.loc[i + 1, 'Compound']
-            
-            # Pit stop occurred if compound changed
-            if current_compound != next_compound and pd.notna(current_compound) and pd.notna(next_compound):
-                pit_stops_list.append({
-                    'Driver': driver,
-                    'LapNumber': driver_laps.loc[i, 'LapNumber'],
-                    'CompoundOut': next_compound,  # New tyre after pit stop
-                    'LapTimeSeconds': driver_laps.loc[i, 'LapTimeSeconds']
-                })
-    
-    if pit_stops_list:
-        return pd.DataFrame(pit_stops_list).sort_values('LapNumber')
-    else:
-        return pd.DataFrame(columns=['Driver', 'LapNumber', 'CompoundOut', 'LapTimeSeconds'])
+    if "PitInTime" in laps.columns and laps["PitInTime"].notna().any():
+        return _pit_stops_from_timing(laps)
+    return _pit_stops_from_compound_change(laps)
 
 
 def get_driver_stats(laps: pd.DataFrame, driver: str) -> dict:
